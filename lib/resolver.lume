@@ -1,6 +1,7 @@
-// resolver.lume — GraphQL resolver 生成器
+// resolver.lume — GraphQL resolver 生成器（模板渲染版）
 // 对照 nsgm src/generators/resolver-generator.ts；M1 精简：不含 DataLoader 与批量方法
 import "model.lume" as m;
+import "tpl.lume" as tpl;
 
 export func gen_resolver(ctrl: string, fs, n: int): string {
   let C = m.cap(ctrl);
@@ -12,137 +13,14 @@ export func gen_resolver(ctrl: string, fs, n: int): string {
   let ins_vals = insert_values(fs, form);
   let upd = update_fields(fs, form);
   let conds = search_conds(fs, search);
-
-  let s = "const { executeQuery, executePaginatedQuery } = require('../../utils/common')\n";
-  s = s + "const { validatePagination, validateId } = require('../../utils/validation')\n";
-  s = s + "\n";
-  s = s + "module.exports = {\n";
-  s = s + "    // 获取" + ctrl + "列表（分页）\n";
-  s = s + "    " + ctrl + ": async ({ page = 0, pageSize = 10 }) => {\n";
-  s = s + "        try {\n";
-  s = s + "            const { page: validPage, pageSize: validPageSize } = validatePagination(page, pageSize);\n";
-  s = s + "\n";
-  s = s + "            const sql = 'SELECT " + sel + " FROM `" + ctrl + "` LIMIT ? OFFSET ?';\n";
-  s = s + "            const countSql = 'SELECT COUNT(*) as counts FROM `" + ctrl + "`';\n";
-  s = s + "            const values = [validPageSize, validPage * validPageSize];\n";
-  s = s + "\n";
-  s = s + "            return await executePaginatedQuery(sql, countSql, values);\n";
-  s = s + "        } catch (error) {\n";
-  s = s + "            console.error('获取" + ctrl + "列表失败:', error.message);\n";
-  s = s + "            throw error;\n";
-  s = s + "        }\n";
-  s = s + "    },\n";
-  s = s + "\n";
-  s = s + "    // 根据ID获取" + ctrl + "\n";
-  s = s + "    " + ctrl + "Get: async ({ id }) => {\n";
-  s = s + "        try {\n";
-  s = s + "            const validId = validateId(id);\n";
-  s = s + "\n";
-  s = s + "            const sql = 'SELECT " + sel + " FROM `" + ctrl + "` WHERE id = ?';\n";
-  s = s + "            const values = [validId];\n";
-  s = s + "\n";
-  s = s + "            const rows = await executeQuery(sql, values);\n";
-  s = s + "            if (!rows || rows.length === 0) {\n";
-  s = s + "                throw new Error(`ID为 ${validId} 的" + ctrl + "不存在`);\n";
-  s = s + "            }\n";
-  s = s + "\n";
-  s = s + "            return rows[0];\n";
-  s = s + "        } catch (error) {\n";
-  s = s + "            console.error('获取" + ctrl + "失败:', error.message);\n";
-  s = s + "            throw error;\n";
-  s = s + "        }\n";
-  s = s + "    },\n";
-  s = s + "\n";
-  s = s + "    // 搜索" + ctrl + "（分页）\n";
-  s = s + "    " + ctrl + "Search: async ({ page = 0, pageSize = 10, data = {} }, context) => {\n";
-  s = s + "        try {\n";
-  s = s + "            const { page: validPage, pageSize: validPageSize } = validatePagination(page, pageSize);\n";
-  s = s + "\n";
-  s = s + "            const values = [];\n";
-  s = s + "            let whereSql = '';\n";
-  s = s + conds + "\n";
-  s = s + "\n";
-  s = s + "            const sql = 'SELECT " + sel + " FROM `" + ctrl + "` WHERE 1=1' + whereSql + ' LIMIT ? OFFSET ?';\n";
-  s = s + "            const countSql = 'SELECT COUNT(*) as counts FROM `" + ctrl + "` WHERE 1=1' + whereSql;\n";
-  s = s + "\n";
-  s = s + "            values.push(validPageSize, validPage * validPageSize);\n";
-  s = s + "\n";
-  s = s + "            return await executePaginatedQuery(sql, countSql, values);\n";
-  s = s + "        } catch (error) {\n";
-  s = s + "            console.error('搜索" + ctrl + "失败:', error.message);\n";
-  s = s + "            throw error;\n";
-  s = s + "        }\n";
-  s = s + "    },\n";
-  s = s + "\n";
-  s = s + "    // 添加" + ctrl + "\n";
-  s = s + "    " + ctrl + "Add: async ({ data }) => {\n";
-  s = s + "        try {\n";
-  s = s + "            if (!data) {\n";
-  s = s + "                throw new Error('添加数据不能为空');\n";
-  s = s + "            }\n";
-  s = s + "\n";
-  s = s + "            const sql = 'INSERT INTO `" + ctrl + "` (" + ins_fields + ") VALUES (" + ins_q + ")';\n";
-  s = s + "            const values = [" + ins_vals + "];\n";
-  s = s + "\n";
-  s = s + "            console.log('添加" + ctrl + ":', { sql, values });\n";
-  s = s + "\n";
-  s = s + "            const results = await executeQuery(sql, values);\n";
-  s = s + "            return results.insertId;\n";
-  s = s + "        } catch (error) {\n";
-  s = s + "            console.error('添加" + ctrl + "失败:', error.message);\n";
-  s = s + "            throw error;\n";
-  s = s + "        }\n";
-  s = s + "    },\n";
-  s = s + "\n";
-  s = s + "    // 更新" + ctrl + "\n";
-  s = s + "    " + ctrl + "Update: async ({ id, data }) => {\n";
-  s = s + "        try {\n";
-  s = s + "            const validId = validateId(id);\n";
-  s = s + "\n";
-  s = s + "            if (!data) {\n";
-  s = s + "                throw new Error('更新数据不能为空');\n";
-  s = s + "            }\n";
-  s = s + "\n";
-  s = s + "            const sql = 'UPDATE `" + ctrl + "` SET " + upd + " WHERE id = ?';\n";
-  s = s + "            const values = [" + insert_values(fs, form) + ", validId];\n";
-  s = s + "\n";
-  s = s + "            console.log('更新" + ctrl + ":', { sql, values });\n";
-  s = s + "\n";
-  s = s + "            const results = await executeQuery(sql, values);\n";
-  s = s + "            if (results.affectedRows === 0) {\n";
-  s = s + "                throw new Error(`ID为 ${validId} 的" + ctrl + "不存在`);\n";
-  s = s + "            }\n";
-  s = s + "\n";
-  s = s + "            return true;\n";
-  s = s + "        } catch (error) {\n";
-  s = s + "            console.error('更新" + ctrl + "失败:', error.message);\n";
-  s = s + "            throw error;\n";
-  s = s + "        }\n";
-  s = s + "    },\n";
-  s = s + "\n";
-  s = s + "    // 删除" + ctrl + "\n";
-  s = s + "    " + ctrl + "Delete: async ({ id }) => {\n";
-  s = s + "        try {\n";
-  s = s + "            const validId = validateId(id);\n";
-  s = s + "\n";
-  s = s + "            const sql = 'DELETE FROM `" + ctrl + "` WHERE id = ?';\n";
-  s = s + "            const values = [validId];\n";
-  s = s + "\n";
-  s = s + "            console.log('删除" + ctrl + ":', { sql, values });\n";
-  s = s + "\n";
-  s = s + "            const results = await executeQuery(sql, values);\n";
-  s = s + "            if (results.affectedRows === 0) {\n";
-  s = s + "                throw new Error(`ID为 ${validId} 的" + ctrl + "不存在`);\n";
-  s = s + "            }\n";
-  s = s + "\n";
-  s = s + "            return true;\n";
-  s = s + "        } catch (error) {\n";
-  s = s + "            console.error('删除" + ctrl + "失败:', error.message);\n";
-  s = s + "            throw error;\n";
-  s = s + "        }\n";
-  s = s + "    }\n";
-  s = s + "};\n";
-  return s;
+  let ctx = {
+    "ctrl": ctrl, "C": C, "sel": sel,
+    "ins_fields": ins_fields, "ins_q": ins_q, "ins_vals": ins_vals,
+    "upd": upd, "conds": conds
+  };
+  let tpl_text = read_file("templates/resolver.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/resolver.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
 }
 
 func all_names(fs, n: int): string {
@@ -207,11 +85,11 @@ func search_conds(fs, idx) {
   let k = len(idx);
   while (i < k) {
     let nm = m.fname(fs[idx[i]]);
-    push(out, "            if (data." + nm + " !== undefined && data." + nm + " !== '') {\n");
-    push(out, "                whereSql += ' AND `" + nm + "` = ?';\n");
-    push(out, "                values.push(data." + nm + ");\n");
-    push(out, "            }\n");
+    push(out, "            if (data." + nm + " !== undefined && data." + nm + " !== '') {");
+    push(out, "                whereSql += ' AND `" + nm + "` = ?';");
+    push(out, "                values.push(data." + nm + ");");
+    push(out, "            }");
     i = i + 1;
   }
-  return join(out, "");
+  return join(out, "\n");
 }

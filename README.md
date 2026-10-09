@@ -8,19 +8,22 @@
 
 ```
 lume-nsgm/
-├── main.lume            # CLI 入口（create / 读 config 批量）
+├── main.lume            # CLI 入口（create / init / 读 config 批量）
 ├── example-config.json  # 批量生成配置（user + order）
+├── templates/           # 渲染模板（sql/schema/service/resolver/page/actions/reducer/styled/i18n）
 ├── lib/
 │   ├── model.lume       # 字段模型 + 类型映射（gql/sql 类型、下标过滤）
-│   ├── sql.lume         # SQL 生成器（建库建表）
-│   ├── schema.lume      # GraphQL schema 生成器
-│   ├── service.lume     # GraphQL 客户端 service 生成器
-│   ├── resolver.lume    # GraphQL resolver 生成器
-│   ├── page.lume        # Antd 页面生成器（Table + Modal 表单）
-│   └── scaffold.lume    # 文件树写入 + redux/styled/i18n 生成
+│   ├── tpl.lume         # 极简模板引擎（{{var}} / {{#each}} / {{#if}}）
+│   ├── sql.lume         # SQL 生成器（模板渲染）
+│   ├── schema.lume      # GraphQL schema 生成器（模板渲染）
+│   ├── service.lume     # GraphQL 客户端 service 生成器（模板渲染）
+│   ├── resolver.lume    # GraphQL resolver 生成器（模板渲染）
+│   ├── page.lume        # Antd 页面生成器（模板渲染）
+│   └── scaffold.lume    # 文件树写入 + redux/styled/i18n 生成（模板渲染）
 └── tests/
     ├── t1.lume          # model/sql/schema 验证
-    └── t2.lume          # service/resolver/page 验证
+    ├── t2.lume          # service/resolver/page 验证
+    └── t3.lume          # 模板引擎验证（each/if/变量替换）
 ```
 
 ## 用法
@@ -32,7 +35,10 @@ make run
 # 单模块：命令行模板字段
 make dev
 
-# 语法检查
+# 交互式字段录入后生成（stdin 逐行输入 name type [required] [searchable]，空行结束）
+echo "name varchar required searchable" | make init MODULE=product
+
+# 语法检查（含模板引擎 t3）
 make check
 
 # 清理生成目录
@@ -44,6 +50,7 @@ make clean
 ```powershell
 E:/Workspace/lume-core/bin/lume-core main.lume example-config.json
 E:/Workspace/lume-core/bin/lume-core main.lume create order
+E:/Workspace/lume-core/bin/lume-core main.lume init product
 ```
 
 生成产物落在 `./gen/`：
@@ -84,10 +91,14 @@ gen/
 支持类型：`varchar` / `text` / `integer` / `decimal` / `boolean` / `date` / `datetime` / `timestamp`。
 字段属性：`required` / `primary` / `auto` / `system` / `showInList` / `showInForm` / `searchable` / `comment` / `length`。
 
-## M1 状态
+## M2 状态
 
-已完成（对照 nsgm 8 个生成器中的 6 个核心）：model / sql / schema / service / resolver / page / scaffold（redux/styled/i18n 简版）。
-暂不含（后续迭代）：i18n 多语言完整集成、上传/CSV 导出、DataLoader 批量、字段级校验函数、stdin 交互初始化。
+已完成（M1 6 个核心生成器 + M2 两项缺口）：
+- **lume-core `read_stdin()` 内建**：`read_stdin()` 读一行（去换行）、`read_stdin("all")` 读全部，EOF/空输入返回 `""`，为 init 交互命令铺路
+- **模板渲染引擎 `lib/tpl.lume`**：语法 `{{var}}`（点路径）、`{{#each list as it}}...{{/each}}`（支持指令行内联每行模板）、`{{#if path}}...{{else}}...{{/if}}`（行内 if，可嵌套）；生成器从字符串拼接迁移到 `templates/*.tpl` 模板渲染
+- **init 交互命令**：stdin 逐行录入字段后生成（`make init MODULE=product`）
+
+暂不含（后续迭代）：i18n 多语言完整集成、上传/CSV 导出、DataLoader 批量、字段级校验函数。
 
 ## 与 lume-core 的关系
 
@@ -95,3 +106,4 @@ lume-nsgm 是 lume 语言的**第一个真实业务级应用**（生成器领域
 - P0：`json` 解码、`argv()`、递归 `files()`
 - P4a：字符串内建 `upper/lower/capitalize/trim/contains/split/join/substr`
 - M1 修复：`join()` 字符串元素 verbatim（无 JSON 引号）、空列表 join 返回 `""` 而非 `null`
+- M2：`read_stdin()` 内建（stdin 交互输入）；模板引擎踩坑：`split("}}")` 会切开 `{{else}}`/`{{/if}}` 需重组、`head` 是保留字、`fbool` 需同时兼容 bool true 与数字 1

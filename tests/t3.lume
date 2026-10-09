@@ -1,0 +1,30 @@
+// tests/t3.lume — 模板引擎验证（each 块 + 行内 if + 变量替换）
+import "../lib/tpl.lume" as tpl;
+
+let ctx = {
+  "ctrl": "user",
+  "db": "crm_demo",
+  "fields": [
+    { "name": "id", "type": "integer", "required": 1, "pk": 1 },
+    { "name": "name", "type": "varchar", "required": 1, "pk": 0 },
+    { "name": "email", "type": "varchar", "required": 0, "pk": 0 }
+  ]
+};
+
+let tpl_text = "CREATE TABLE `{{ctrl}}` (\n"
+  + "{{#each fields as f}}  `{{f.name}}` {{f.type}}"
+  + "{{#if f.required}} NOT NULL{{/if}}"
+  + "{{#if f.pk}} PRIMARY KEY{{/if}}\n"
+  + "{{/each}});\n";
+
+print("--- render result ---");
+print(tpl.render(tpl_text, ctx));
+print("--- simple subst ---");
+print(tpl.render("db={{db}} ctrl={{ctrl}}", ctx));
+print("--- missing key -> empty ---");
+print("[" + tpl.render("x={{nope}}", ctx) + "]");
+print("--- empty each ---");
+print("[" + tpl.render("pre\n{{#each nosuch as f}}\nx\n{{/each}}\npost\n", ctx) + "]");
+print("--- inline if else ---");
+print(tpl.render("a{{#if db}}DB{{else}}NONE{{/if}}b", ctx));
+print(tpl.render("a{{#if nope}}X{{else}}Y{{/if}}b", ctx));

@@ -1,29 +1,28 @@
-// sql.lume — SQL 生成器（对照 nsgm src/generators/sql-generator.ts）
+// sql.lume — SQL 生成器（模板渲染版，对照 nsgm src/generators/sql-generator.ts）
 import "model.lume" as m;
+import "tpl.lume" as tpl;
 
-export func gen_sql(ctrl: string, fs, n: int, db: string): string {
-  let s = "CREATE DATABASE IF NOT EXISTS " + db + " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n";
-  s = s + "\n";
-  s = s + "use " + db + ";\n";
-  s = s + "\n";
-  s = s + "CREATE TABLE IF NOT EXISTS `" + ctrl + "` (\n";
-  let i = 0;
-  while (i < n) {
-    if (i > 0) { s = s + ",\n"; }
-    s = s + field_def(fs[i]);
-    i = i + 1;
-  }
-  s = s + ",\n";
-  s = s + "  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;";
-  return s;
+// 字段 -> 模板 ctx 条目：type_sql 等逻辑仍由 model 层计算
+func field_ctx(f, last: int) {
+  let fm = {
+    "name": m.fname(f),
+    "type_sql": m.sql_type(f),
+    "not_null": m.sql_not_null(f) != "",
+    "auto": m.fauto(f) == 1,
+    "comment": m.fcomment(f)
+  };
+  return fm;
 }
 
-func field_def(f): string {
-  let s = "  `" + m.fname(f) + "` " + m.sql_type(f);
-  s = s + m.sql_not_null(f);
-  if (m.fauto(f) == 1) { s = s + " AUTO_INCREMENT"; }
-  s = s + m.sql_default(f);
-  let c = m.fcomment(f);
-  if (c != "") { s = s + " COMMENT '" + c + "'"; }
-  return s;
+export func gen_sql(ctrl: string, fs, n: int, db: string): string {
+  let fields = [];
+  let i = 0;
+  while (i < n) {
+    push(fields, field_ctx(fs[i], i));
+    i = i + 1;
+  }
+  let ctx = { "db": db, "ctrl": ctrl, "fields": fields };
+  let tpl_text = read_file("templates/sql.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/sql.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
 }

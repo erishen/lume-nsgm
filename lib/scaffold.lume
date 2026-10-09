@@ -1,145 +1,37 @@
-// scaffold.lume — 文件树写入 + redux/styled/i18n 生成
+// scaffold.lume — 文件树写入 + redux/styled/i18n 生成（模板渲染版）
 // 对照 nsgm src/generators/file-generator.ts；M1 精简文件集
 import "model.lume" as m;
+import "tpl.lume" as tpl;
 
 // ---- redux actions ----
 export func gen_actions(ctrl: string): string {
   let C = m.cap(ctrl);
-  let s = "import { createAction } from '@reduxjs/toolkit'\n";
-  s = s + "import {\n";
-  s = s + "  search" + C + "Service,\n";
-  s = s + "  add" + C + "Service,\n";
-  s = s + "  update" + C + "Service,\n";
-  s = s + "  delete" + C + "Service,\n";
-  s = s + "} from '@/service/" + ctrl + "'\n";
-  s = s + "\n";
-  s = s + "export const search" + C + " = createAction<string | object>('" + ctrl + "/search" + C + "')\n";
-  s = s + "export const add" + C + " = createAction<object>('" + ctrl + "/add" + C + "')\n";
-  s = s + "export const mod" + C + " = createAction<{ id: number; data: object }>('" + ctrl + "/mod" + C + "')\n";
-  s = s + "export const del" + C + " = createAction<number>('" + ctrl + "/del" + C + "')\n";
-  s = s + "\n";
-  s = s + "export const set" + C + "Data = createAction<{ totalCounts: number; items: any[] }>('" + ctrl + "/setData')\n";
-  return s;
+  let tpl_text = read_file("templates/actions.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/actions.tpl missing"; }
+  return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
 }
 
 // ---- redux reducer（含异步 thunk 简版）----
 export func gen_reducer(ctrl: string): string {
   let C = m.cap(ctrl);
-  let s = "import { createSlice, createAsyncThunk } from '@reduxjs/toolkit'\n";
-  s = s + "import {\n";
-  s = s + "  search" + C + "Service,\n";
-  s = s + "  add" + C + "Service,\n";
-  s = s + "  update" + C + "Service,\n";
-  s = s + "  delete" + C + "Service,\n";
-  s = s + "} from '@/service/" + ctrl + "'\n";
-  s = s + "\n";
-  s = s + "const initialState = {\n";
-  s = s + "  totalCounts: 0,\n";
-  s = s + "  items: [],\n";
-  s = s + "  loading: false,\n";
-  s = s + "}\n";
-  s = s + "\n";
-  s = s + "export const fetch" + C + "List = createAsyncThunk('" + ctrl + "/fetchList', async (params: any) => {\n";
-  s = s + "  const res = await search" + C + "Service(params.page, params.pageSize, params.data)\n";
-  s = s + "  return res.data\n";
-  s = s + "})\n";
-  s = s + "\n";
-  s = s + "export const create" + C + " = createAsyncThunk('" + ctrl + "/create', async (data: any) => {\n";
-  s = s + "  await add" + C + "Service(data)\n";
-  s = s + "  return true\n";
-  s = s + "})\n";
-  s = s + "\n";
-  s = s + "export const update" + C + " = createAsyncThunk('" + ctrl + "/update', async ({ id, data }: { id: number; data: any }) => {\n";
-  s = s + "  await update" + C + "Service(id, data)\n";
-  s = s + "  return true\n";
-  s = s + "})\n";
-  s = s + "\n";
-  s = s + "export const remove" + C + " = createAsyncThunk('" + ctrl + "/remove', async (id: number) => {\n";
-  s = s + "  await delete" + C + "Service(id)\n";
-  s = s + "  return id\n";
-  s = s + "})\n";
-  s = s + "\n";
-  s = s + "const " + ctrl + "Slice = createSlice({\n";
-  s = s + "  name: '" + ctrl + "',\n";
-  s = s + "  initialState,\n";
-  s = s + "  reducers: {},\n";
-  s = s + "  extraReducers: (builder) => {\n";
-  s = s + "    builder\n";
-  s = s + "      .addCase(fetch" + C + "List.pending, (state) => { state.loading = true })\n";
-  s = s + "      .addCase(fetch" + C + "List.fulfilled, (state, action) => {\n";
-  s = s + "        state.loading = false\n";
-  s = s + "        state.totalCounts = action.payload.totalCounts\n";
-  s = s + "        state.items = action.payload.items\n";
-  s = s + "      })\n";
-  s = s + "      .addCase(fetch" + C + "List.rejected, (state) => { state.loading = false })\n";
-  s = s + "  },\n";
-  s = s + "})\n";
-  s = s + "\n";
-  s = s + "export default " + ctrl + "Slice.reducer\n";
-  return s;
+  let tpl_text = read_file("templates/reducer.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/reducer.tpl missing"; }
+  return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
 }
 
 // ---- styled-components ----
 export func gen_styled(ctrl: string): string {
-  let s = "import styled from 'styled-components'\n";
-  s = s + "\n";
-  s = s + "export const Container = styled.div`\n";
-  s = s + "  padding: 24px;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const SearchRow = styled.div`\n";
-  s = s + "  display: flex;\n";
-  s = s + "  gap: 12px;\n";
-  s = s + "  margin-bottom: 16px;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const ModalContainer = styled.div`\n";
-  s = s + "  display: flex;\n";
-  s = s + "  flex-direction: column;\n";
-  s = s + "  gap: 12px;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const StyledButton = styled.button`\n";
-  s = s + "  padding: 6px 16px;\n";
-  s = s + "  border-radius: 4px;\n";
-  s = s + "  cursor: pointer;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const StyledInput = styled.input`\n";
-  s = s + "  padding: 6px 12px;\n";
-  s = s + "  border: 1px solid #d9d9d9;\n";
-  s = s + "  border-radius: 4px;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const StyledTable = styled.table`\n";
-  s = s + "  width: 100%;\n";
-  s = s + "  border-collapse: collapse;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const ModalInput = styled.input`\n";
-  s = s + "  padding: 6px 12px;\n";
-  s = s + "  border: 1px solid #d9d9d9;\n";
-  s = s + "  border-radius: 4px;\n";
-  s = s + "`\n";
-  s = s + "\n";
-  s = s + "export const GlobalStyle = styled.div`\n";
-  s = s + "  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;\n";
-  s = s + "`\n";
-  return s;
+  let tpl_text = read_file("templates/styled.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/styled.tpl missing"; }
+  return tpl.render(tpl_text, {});
 }
 
 // ---- i18n（zh-CN 简版）----
 export func gen_i18n(ctrl: string, fs, n: int): string {
   let C = m.cap(ctrl);
-  let s = "export default {\n";
-  s = s + "  " + ctrl + ": {\n";
-  s = s + "    search: '搜索" + ctrl + "',\n";
-  s = s + "    add: '新增" + C + "',\n";
-  s = s + "    edit: '编辑" + C + "',\n";
-  s = s + "    delete: '删除" + C + "',\n";
-  s = s + "  },\n";
-  s = s + "}\n";
-  return s;
+  let tpl_text = read_file("templates/i18n.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/i18n.tpl missing"; }
+  return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
 }
 
 // ---- 文件树写入 ----

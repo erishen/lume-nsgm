@@ -1,6 +1,7 @@
 // main.lume — lume-nsgm CLI 入口
 // 用法：
 //   lume-core main.lume create <module> [db] [out]   — 命令行单模块生成
+//   lume-core main.lume init <module> [db] [out]     — 交互式字段录入后生成（stdin）
 //   lume-core main.lume example-config.json          — 读配置文件批量生成
 import "lib/model.lume" as m;
 import "lib/sql.lume" as sql;
@@ -47,6 +48,41 @@ func cmd_create(args): int {
   return 0;
 }
 
+// 交互式创建：stdin 逐行输入字段（name type [required] [searchable]），空行结束
+func cmd_init(args): int {
+  let ctrl = get(args, 1, "");
+  if (ctrl == "") {
+    print("usage: lume-core main.lume init <module> [db] [out]");
+    return 1;
+  }
+  let db = get(args, 2, "crm_demo");
+  let out = get(args, 3, "./gen");
+  let fs = [];
+  push(fs, { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "ID" });
+  print("enter fields: name type [required] [searchable] (empty line to finish)");
+  let done = 0;
+  while (done == 0) {
+    print("field> ");
+    let line = read_stdin();
+    if (line == "") { done = 1; } else {
+      let parts = split(line, " ");
+      let nm = trim(get(parts, 0, ""));
+      if (nm == "") { done = 1; } else {
+        let ty = trim(get(parts, 1, "varchar"));
+        let required = 0;
+        let searchable = 0;
+        if (contains(line, "required")) { required = 1; }
+        if (contains(line, "searchable")) { searchable = 1; }
+        push(fs, { "name": nm, "type": ty, "required": required, "primary": 0, "auto": 0, "system": 0, "showInList": 1, "showInForm": 1, "searchable": searchable, "comment": nm });
+        print("  + " + nm + " (" + ty + ")");
+      }
+    }
+  }
+  gen_one(ctrl, fs, len(fs), db, out);
+  print("init done: " + ctrl + " (" + str(len(fs)) + " fields)");
+  return 0;
+}
+
 // 配置文件批量生成：json 数组 modules + db + out
 func cmd_config(path: string): int {
   let txt = read_file(path);
@@ -72,10 +108,13 @@ let args = argv();
 let cmd = get(args, 0, "");
 if (cmd == "create") {
   cmd_create(args);
+} else if (cmd == "init") {
+  cmd_init(args);
 } else if (cmd != "") {
   cmd_config(cmd);
 } else {
   print("usage:");
   print("  lume-core main.lume create <module> [db] [out]");
+  print("  lume-core main.lume init <module> [db] [out]");
   print("  lume-core main.lume <config.json>");
 }

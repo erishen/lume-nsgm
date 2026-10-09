@@ -3,7 +3,7 @@
 LUME = E:/Workspace/lume-core/bin/lume-core
 TARGET = main.lume
 
-.PHONY: run dev check clean
+.PHONY: run dev init check clean
 
 run:
 	$(LUME) $(TARGET) example-config.json
@@ -11,10 +11,14 @@ run:
 dev:
 	$(LUME) $(TARGET) create user
 
+# 交互式字段录入后生成：echo "name varchar required searchable" | make init MODULE=product
+init:
+	$(LUME) $(TARGET) init $(MODULE)
+
 check:
 	$(LUME) --check $(TARGET)
-	$(LUME) --check tests/t1.lume
-	$(LUME) --check tests/t2.lume
+	$(LUME) --check lib/tpl.lume
+	$(LUME) --check tests/t3.lume
 
 clean:
 	rmdir /s /q gen 2>nul || (rd /s /q gen 2>nul & exit 0)

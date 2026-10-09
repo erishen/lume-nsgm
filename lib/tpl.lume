@@ -1,0 +1,211 @@
+// tpl.lume — 极简模板渲染引擎（lume-nsgm M2）
+// 语法（控制指令必须独占一行，行首开始）：
+//   {{name}}                         变量替换（ctx 的一级 key 或点路径 a.b）
+//   {{#each items as it}}...{{/each}}   循环：it 为循环变量
+//   {{#if cond}}...{{else}}...{{/if}}   条件：cond 为 ctx 路径（truthy 判定）
+// 用法：
+//   let tpl = read_file("templates/sql.tpl");
+//   let out = tpl.render(tpl, {"ctrl": "user", "db": "crm_demo", "fields": [...]});
+
+type RenderResult = { text: string, next: int };
+
+// 点路径取值：ctx["a"]["b"]...；任一级缺失/非 map -> ""
+func resolve(ctx, path: string): string {
+  let parts = split(path, ".");
+  let cur = ctx;
+  let i = 0;
+  while (i < len(parts)) {
+    let v = get(cur, parts[i], "");
+    if (v == "" && i < len(parts) - 1) { return ""; }
+    cur = v;
+    i = i + 1;
+  }
+  return str(cur);
+}
+
+// 变量替换：把 {{path}} 换成 resolve(ctx, path)（不含块指令）
+func subst_vars(line: string, ctx): string {
+  let parts = split(line, "{{");
+  if (len(parts) <= 1) { return line; }
+  let out = parts[0];
+  let i = 1;
+  while (i < len(parts)) {
+    let segs = split(parts[i], "}}");
+    let key = trim(segs[0]);
+    out = out + resolve(ctx, key);
+    if (len(segs) > 1) { out = out + segs[1]; }
+    i = i + 1;
+  }
+  return out;
+}
+
+// 行内 {{#if key}}A{{else}}B{{/if}} 展开（可嵌套；each 仍是跨行块）
+func subst(line: string, ctx): string {
+  let p = split(line, "{{#if ");
+  if (len(p) <= 1) { return subst_vars(line, ctx); }
+  let out = subst_vars(p[0], ctx);
+  let i = 1;
+  while (i < len(p)) {
+    let seg = p[i];
+    let ks = split(seg, "}}");
+    let key = trim(ks[0]);
+    // 重组剩余片段：split("}}") 会把 {{else}}/{{/if}} 里的 "}}" 也切开，
+    // 必须用 "}}" 重新拼接 ks[1..] 才能得到完整的 rest
+    let rest = "";
+    let j = 1;
+    while (j < len(ks)) {
+      if (j > 1) { rest = rest + "}}"; }
+      rest = rest + ks[j];
+      j = j + 1;
+    }
+    let es = split(rest, "{{else}}");
+    let true_body = es[0];
+    let tail = "";
+    let false_body = "";
+    if (len(es) > 1) {
+      let fe = split(es[1], "{{/if}}");
+      false_body = get(fe, 0, "");
+      tail = get(fe, 1, "");
+    } else {
+      let te = split(true_body, "{{/if}}");
+      true_body = get(te, 0, "");
+      tail = get(te, 1, "");
+    }
+    if (truthy(resolve(ctx, key))) {
+      out = out + subst(true_body, ctx);
+    } else {
+      out = out + subst(false_body, ctx);
+    }
+    out = out + subst(tail, ctx);
+    i = i + 1;
+  }
+  return out;
+}
+
+// 行首控制指令判定
+func is_each(t: string): bool { return substr(t, 0, 8) == "{{#each "; }
+func is_ife(t: string): bool { return substr(t, 0, 6) == "{{#if "; }
+func is_end_each(t: string): bool { return substr(t, 0, 9) == "{{/each}}"; }
+func is_end_if(t: string): bool { return substr(t, 0, 7) == "{{/if}}"; }
+func is_else(t: string): bool { return trim(t) == "{{else}}"; }
+
+// 跨行块指令：行首是指令且行内没有终结符（行内 if/each 交给 subst）
+func is_block_each(t: string): bool {
+  return is_each(t) && !contains(t, "{{/each}}");
+}
+func is_block_if(t: string): bool {
+  return is_ife(t) && !contains(t, "{{/if}}");
+}
+
+// truthy：非空且非 "0"/"false"
+func truthy(s: string): bool {
+  if (s == "") { return false; }
+  if (s == "0") { return false; }
+  if (s == "false") { return false; }
+  return true;
+}
+
+// 渲染 each 块：lines[start] 是 {{#each X as it}}（可内联每行模板）
+func render_each(lines, start: int, ctx): RenderResult {
+  let t = trim(lines[start]);
+  // 剥离指令头，得到行内模板（split("}}") 会把行内 if 的 "}}" 也切开，
+  // 需要重组：head_parts[0] 是指令，其余部分用 "}}" 重新拼回）
+  let head_parts = split(t, "}}");
+  let head_part = head_parts[0];
+  let inline = "";
+  let k = 1;
+  while (k < len(head_parts)) {
+    if (k > 1) { inline = inline + "}}"; }
+    inline = inline + head_parts[k];
+    k = k + 1;
+  }
+  let inner = trim(substr(head_part, 8, len(head_part) - 8));
+  let parts = split(inner, " as ");
+  let list_key = trim(parts[0]);
+  let item_key = trim(get(parts, 1, "it"));
+  let items = get(ctx, list_key, []);
+  let out = "";
+  let n = len(lines);
+  let end = start + 1;
+  let depth = 1;
+  while (end < n) {
+    let tt = trim(lines[end]);
+    if (is_end_each(tt)) {
+      depth = depth - 1;
+      if (depth == 0) { break; }
+    }
+    if (is_each(tt)) { depth = depth + 1; }
+    end = end + 1;
+  }
+  let j = 0;
+  while (j < len(items)) {
+    put(ctx, item_key, items[j]);
+    if (inline != "") { out = out + subst(inline, ctx) + "\n"; }
+    let res = render_block(lines, start + 1, ctx, end);
+    out = out + res.text;
+    j = j + 1;
+  }
+  return { text: out, next: end + 1 };
+}
+
+// 渲染 if 块：lines[start] 是 {{#if cond}}
+func render_if(lines, start: int, ctx): RenderResult {
+  let t = trim(lines[start]);
+  let key = trim(substr(t, 6, len(t) - 8));
+  let cond = truthy(resolve(ctx, key));
+  let out = "";
+  let n = len(lines);
+  let end = start + 1;
+  let depth = 1;
+  let else_idx = -1;
+  while (end < n) {
+    let tt = trim(lines[end]);
+    if (is_end_if(tt)) {
+      depth = depth - 1;
+      if (depth == 0) { break; }
+    }
+    if (is_ife(tt)) { depth = depth + 1; }
+    if (depth == 1 && is_else(tt)) { else_idx = end; }
+    end = end + 1;
+  }
+  if (cond) {
+    let stop = else_idx;
+    if (stop < 0) { stop = end; }
+    out = out + render_block(lines, start + 1, ctx, stop).text;
+  } else {
+    if (else_idx >= 0) {
+      out = out + render_block(lines, else_idx + 1, ctx, end).text;
+    }
+  }
+  return { text: out, next: end + 1 };
+}
+
+// 渲染 [from, to) 行区间；块指令递归展开。
+func render_block(lines, from: int, ctx, to: int): RenderResult {
+  let out = "";
+  let i = from;
+  while (i < to) {
+    let raw = lines[i];
+    let t = trim(raw);
+    if (is_block_each(t)) {
+      let res = render_each(lines, i, ctx);
+      out = out + res.text;
+      i = res.next;
+    } else if (is_block_if(t)) {
+      let res = render_if(lines, i, ctx);
+      out = out + res.text;
+      i = res.next;
+    } else {
+      out = out + subst(raw, ctx) + "\n";
+      i = i + 1;
+    }
+  }
+  return { text: out, next: -1 };
+}
+
+// 主入口：渲染整个模板字符串
+export func render(tpl: string, ctx): string {
+  let lines = split(tpl, "\n");
+  let res = render_block(lines, 0, ctx, len(lines));
+  return res.text;
+}

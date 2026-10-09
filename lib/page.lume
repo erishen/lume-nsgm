@@ -1,6 +1,7 @@
-// page.lume — 页面生成器（Antd Table + 搜索框 + 简单 Modal 表单）
+// page.lume — 页面生成器（模板渲染版，Antd Table + 搜索框 + 简单 Modal 表单）
 // 对照 nsgm src/generators/page-generator.ts；M1 精简：不含上传/CSV/i18n 完整集成
 import "model.lume" as m;
+import "tpl.lume" as tpl;
 
 export func gen_page(ctrl: string, fs, n: int): string {
   let C = m.cap(ctrl);
@@ -12,116 +13,16 @@ export func gen_page(ctrl: string, fs, n: int): string {
   let main_s = main_search(fs, search);
   let search_hook = "";
   if (main_s != "") { search_hook = "  const [search" + m.cap(main_s) + ", setSearch" + m.cap(main_s) + "] = useState('')\n"; }
-
-  let s = "import React, { useState, useEffect } from 'react'\n";
-  s = s + "import { ConfigProvider, Modal, Space, message } from 'antd'\n";
-  s = s + "import {\n";
-  s = s + "  Container,\n";
-  s = s + "  SearchRow,\n";
-  s = s + "  ModalContainer,\n";
-  s = s + "  StyledButton,\n";
-  s = s + "  StyledInput,\n";
-  s = s + "  StyledTable,\n";
-  s = s + "  ModalInput,\n";
-  s = s + "  GlobalStyle,\n";
-  s = s + "} from '@/styled/" + ctrl + "'\n";
-  s = s + "import { useDispatch, useSelector } from 'react-redux'\n";
-  s = s + "import {\n";
-  s = s + "  search" + C + ",\n";
-  s = s + "  add" + C + ",\n";
-  s = s + "  mod" + C + ",\n";
-  s = s + "  del" + C + ",\n";
-  s = s + "} from '@/redux/" + ctrl + "/actions'\n";
-  s = s + "import { get" + C + "Service } from '@/service/" + ctrl + "'\n";
-  s = s + "import { RootState, AppDispatch } from '@/redux/store'\n";
-  s = s + "import _ from 'lodash'\n";
-  s = s + "\n";
-  s = s + "const pageSize = 100\n";
-  s = s + "\n";
-  s = s + "const Page = ({ " + ctrl + " }) => {\n";
-  s = s + "  const dispatch = useDispatch<AppDispatch>()\n";
-  s = s + "  const [isModalVisiable, setIsModalVisible] = useState(false)\n";
-  s = s + "  const [modalId, setModalId] = useState(0)\n";
-  s = s + search_hook;
-  s = s + "  const [batchDelIds, setBatchDelIds] = useState([])\n";
-  s = s + "\n";
-  s = s + "  useEffect(() => {\n";
-  s = s + "    dispatch(search" + C + "({ page: 0, pageSize }))\n";
-  s = s + "  }, [dispatch])\n";
-  s = s + "\n";
-  s = s + "  const " + ctrl + "Data = useSelector((state: RootState) => state." + ctrl + ")\n";
-  s = s + "  const { totalCounts, items: " + ctrl + "Items } = _.cloneDeep(" + ctrl + "Data)\n";
-  s = s + "\n";
-  s = s + "  const dataSource = " + ctrl + "Items\n";
-  s = s + "\n";
-  s = s + "  const onSearch = () => {\n";
-  s = s + "    dispatch(search" + C + "({ page: 0, pageSize, data: { " + search_arg(fs, search) + " } }))\n";
-  s = s + "  }\n";
-  s = s + "\n";
-  s = s + "  const openAdd = () => {\n";
-  s = s + "    setModalId(0)\n";
-  s = s + "    setIsModalVisible(true)\n";
-  s = s + "  }\n";
-  s = s + "\n";
-  s = s + "  const openEdit = (record: any) => {\n";
-  s = s + "    setModalId(record.id)\n";
-  s = s + "    setIsModalVisible(true)\n";
-  s = s + "  }\n";
-  s = s + "\n";
-  s = s + "  const handleOk = (values: any) => {\n";
-  s = s + "    if (modalId) {\n";
-  s = s + "      dispatch(mod" + C + "({ id: modalId, data: values }))\n";
-  s = s + "    } else {\n";
-  s = s + "      dispatch(add" + C + "(values))\n";
-  s = s + "    }\n";
-  s = s + "    setIsModalVisible(false)\n";
-  s = s + "  }\n";
-  s = s + "\n";
-  s = s + "  const onDelete = (record: any) => {\n";
-  s = s + "    dispatch(del" + C + "(record.id))\n";
-  s = s + "  }\n";
-  s = s + "\n";
-  s = s + "  return (\n";
-  s = s + "    <ConfigProvider>\n";
-  s = s + "      <GlobalStyle />\n";
-  s = s + "      <Container>\n";
-  s = s + "        <SearchRow>\n";
-  s = s + search_input(main_s);
-  s = s + "          <StyledButton type=\"primary\" onClick={onSearch}>搜索</StyledButton>\n";
-  s = s + "          <StyledButton onClick={openAdd}>新增</StyledButton>\n";
-  s = s + "        </SearchRow>\n";
-  s = s + "        <StyledTable\n";
-  s = s + "          rowKey=\"id\"\n";
-  s = s + "          columns={columns}\n";
-  s = s + "          dataSource={dataSource}\n";
-  s = s + "          pagination={{ total: totalCounts }}\n";
-  s = s + "        />\n";
-  s = s + "      </Container>\n";
-  s = s + "      <Modal\n";
-  s = s + "        visible={isModalVisiable}\n";
-  s = s + "        onCancel={() => setIsModalVisible(false)}\n";
-  s = s + "        onOk={() => handleOk({})}\n";
-  s = s + "      >\n";
-  s = s + "        <ModalContainer>\n";
-  s = s + modal;
-  s = s + "        </ModalContainer>\n";
-  s = s + "      </Modal>\n";
-  s = s + "    </ConfigProvider>\n";
-  s = s + "  )\n";
-  s = s + "}\n";
-  s = s + "\n";
-  s = s + "const columns = [\n";
-  s = s + cols;
-  s = s + "  { title: '操作', dataIndex: 'action', render: (_: any, record: any) => (\n";
-  s = s + "    <Space>\n";
-  s = s + "      <StyledButton onClick={() => openEdit(record)}>编辑</StyledButton>\n";
-  s = s + "      <StyledButton danger onClick={() => onDelete(record)}>删除</StyledButton>\n";
-  s = s + "    </Space>\n";
-  s = s + "  ) },\n";
-  s = s + "]\n";
-  s = s + "\n";
-  s = s + "export default Page\n";
-  return s;
+  let ctx = {
+    "ctrl": ctrl, "C": C,
+    "cols": cols, "modal": modal,
+    "search_hook": search_hook,
+    "search_input": search_input(main_s),
+    "search_arg": search_arg(fs, search)
+  };
+  let tpl_text = read_file("templates/page.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/page.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
 }
 
 // 表格列

@@ -1,5 +1,7 @@
-// schema.lume — GraphQL schema 生成器（对照 nsgm src/generators/schema-generator.ts）
+// schema.lume — GraphQL schema 生成器（模板渲染版）
+// 对照 nsgm src/generators/schema-generator.ts
 import "model.lume" as m;
+import "tpl.lume" as tpl;
 
 export func gen_schema(ctrl: string, fs, n: int): string {
   let C = m.cap(ctrl);
@@ -7,42 +9,14 @@ export func gen_schema(ctrl: string, fs, n: int): string {
   let type_fields = join(field_lines(fs, n), "\n");
   let input_fields = join(field_lines_idx(fs, m.form_idx(fs, n)), "\n");
   let search_fields = search_lines(fs, n);
-
-  let s = "module.exports = {\n";
-  s = s + "    query: `\n";
-  s = s + "        " + ctrl + "(page: Int, pageSize: Int): " + P + "\n";
-  s = s + "        " + ctrl + "Get(id: Int): " + C + "\n";
-  s = s + "        " + ctrl + "BatchGet(ids: [Int]): [" + C + "]\n";
-  s = s + "        " + ctrl + "Search(page: Int, pageSize: Int, data: " + C + "SearchInput): " + P + "\n";
-  s = s + "    `,\n";
-  s = s + "    mutation: `\n";
-  s = s + "        " + ctrl + "Add(data: " + C + "AddInput): Int\n";
-  s = s + "        " + ctrl + "BatchAdd(datas: [" + C + "AddInput]): Int\n";
-  s = s + "        " + ctrl + "Update(id: Int, data: " + C + "AddInput): Boolean\n";
-  s = s + "        " + ctrl + "Delete(id: Int): Boolean\n";
-  s = s + "        " + ctrl + "BatchDelete(ids: [Int]): Boolean\n";
-  s = s + "    `,\n";
-  s = s + "    subscription: ``,\n";
-  s = s + "    type: `\n";
-  s = s + "        type " + C + " {\n";
-  s = s + type_fields + "\n";
-  s = s + "        }\n";
-  s = s + "\n";
-  s = s + "        type " + P + " {\n";
-  s = s + "            totalCounts: Int\n";
-  s = s + "            items: [" + C + "]\n";
-  s = s + "        }\n";
-  s = s + "\n";
-  s = s + "        input " + C + "AddInput {\n";
-  s = s + input_fields + "\n";
-  s = s + "        }\n";
-  s = s + "\n";
-  s = s + "        input " + C + "SearchInput {\n";
-  s = s + search_fields + "\n";
-  s = s + "        }\n";
-  s = s + "    `\n";
-  s = s + "};";
-  return s;
+  let ctx = {
+    "ctrl": ctrl, "C": C, "P": P,
+    "type_fields": type_fields, "input_fields": input_fields,
+    "search_fields": search_fields
+  };
+  let tpl_text = read_file("templates/schema.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/schema.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
 }
 
 // 非系统字段的 schema 行（缩进对齐 nsgm 模板的 12 空格）
