@@ -1,0 +1,81 @@
+// main.lume — lume-nsgm CLI 入口
+// 用法：
+//   lume-core main.lume create <module> [db] [out]   — 命令行单模块生成
+//   lume-core main.lume example-config.json          — 读配置文件批量生成
+import "lib/model.lume" as m;
+import "lib/sql.lume" as sql;
+import "lib/schema.lume" as schema;
+import "lib/service.lume" as service;
+import "lib/resolver.lume" as resolver;
+import "lib/page.lume" as page;
+import "lib/scaffold.lume" as sc;
+
+func gen_one(ctrl: string, fs, n: int, db: string, out: string): int {
+  let sql_text = sql.gen_sql(ctrl, fs, n, db);
+  let schema_text = schema.gen_schema(ctrl, fs, n);
+  let service_text = service.gen_service(ctrl, fs, n);
+  let resolver_text = resolver.gen_resolver(ctrl, fs, n);
+  let page_text = page.gen_page(ctrl, fs, n);
+  let actions_text = sc.gen_actions(ctrl);
+  let reducer_text = sc.gen_reducer(ctrl);
+  let styled_text = sc.gen_styled(ctrl);
+  let i18n_text = sc.gen_i18n(ctrl, fs, n);
+
+  sc.write_tree(out, ctrl, sql_text, schema_text, resolver_text,
+    service_text, page_text, actions_text, reducer_text, styled_text, i18n_text);
+  print("generated: " + ctrl + " -> " + out);
+  return 0;
+}
+
+// 命令行 create：位置参数 ctrl，可选 db/out
+func cmd_create(args): int {
+  let ctrl = get(args, 1, "");
+  if (ctrl == "") {
+    print("usage: lume-core main.lume create <module> [db] [out]");
+    return 1;
+  }
+  let db = get(args, 2, "crm_demo");
+  let out = get(args, 3, "./gen");
+  // 默认字段模板（可后续扩展 --fields）
+  let fs = [
+    { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
+    { "name": "name", "type": "varchar", "required": 1, "primary": 0, "auto": 0, "system": 0, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "名称" },
+    { "name": "email", "type": "varchar", "required": 0, "primary": 0, "auto": 0, "system": 0, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "邮箱" },
+    { "name": "create_date", "type": "timestamp", "required": 0, "primary": 0, "auto": 0, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "创建时间" }
+  ];
+  gen_one(ctrl, fs, len(fs), db, out);
+  return 0;
+}
+
+// 配置文件批量生成：json 数组 modules + db + out
+func cmd_config(path: string): int {
+  let txt = read_file(path);
+  let cfg = json(txt);
+  let db = get(cfg, "db", "crm_demo");
+  let out = get(cfg, "out", "./gen");
+  let mods = get(cfg, "modules", []);
+  let i = 0;
+  while (i < len(mods)) {
+    let mod = mods[i];
+    let ctrl = get(mod, "name", "");
+    if (ctrl != "") {
+      let fs = get(mod, "fields", []);
+      gen_one(ctrl, fs, len(fs), db, out);
+    }
+    i = i + 1;
+  }
+  print("done: " + str(len(mods)) + " modules");
+  return 0;
+}
+
+let args = argv();
+let cmd = get(args, 0, "");
+if (cmd == "create") {
+  cmd_create(args);
+} else if (cmd != "") {
+  cmd_config(cmd);
+} else {
+  print("usage:");
+  print("  lume-core main.lume create <module> [db] [out]");
+  print("  lume-core main.lume <config.json>");
+}

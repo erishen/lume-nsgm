@@ -1,0 +1,112 @@
+// service.lume — GraphQL 客户端服务生成器
+// 对照 nsgm src/generators/service-generator.ts；M1 精简：不含 integer 校验函数与批量方法
+import "model.lume" as m;
+
+export func gen_service(ctrl: string, fs, n: int): string {
+  let C = m.cap(ctrl);
+  let sel = select_fields(fs, n);
+  let form = m.form_idx(fs, n);
+  let search = m.search_idx(fs, n);
+  let f_names = names(fs, form);
+  let s_names = names(fs, search);
+
+  let s = "import { getLocalGraphql } from '@/utils/fetch'\n";
+  s = s + "import _ from 'lodash'\n";
+  s = s + "\n";
+  s = s + "export const get" + C + "Service = (page = 0, pageSize = 10) => {\n";
+  s = s + "  const get" + C + "Query = `query ($page: Int, $pageSize: Int) { " + ctrl + "(page: $page, pageSize: $pageSize) { \n";
+  s = s + "        totalCounts items { \n";
+  s = s + "          " + sel + "\n";
+  s = s + "        } \n";
+  s = s + "      } \n";
+  s = s + "    }`\n";
+  s = s + "\n";
+  s = s + "  return getLocalGraphql(get" + C + "Query, {\n";
+  s = s + "    page,\n";
+  s = s + "    pageSize\n";
+  s = s + "  })\n";
+  s = s + "}\n";
+  s = s + "\n";
+  s = s + "export const search" + C + "ByIdService = (id: number) => {\n";
+  s = s + "  const search" + C + "ByIdQuery = `query ($id: Int) { " + ctrl + "Get(id: $id){\n";
+  s = s + "      " + sel + "\n";
+  s = s + "    }\n";
+  s = s + "  }`\n";
+  s = s + "\n";
+  s = s + "  return getLocalGraphql(search" + C + "ByIdQuery, {\n";
+  s = s + "    id\n";
+  s = s + "  })\n";
+  s = s + "}\n";
+  s = s + "\n";
+  s = s + "export const search" + C + "Service = (page = 0, pageSize = 10, data: any) => {\n";
+  s = s + "  const { " + s_names + " } = data\n";
+  s = s + "\n";
+  s = s + "  const search" + C + "Query = `query ($page: Int, $pageSize: Int, $data: " + C + "SearchInput) { \n";
+  s = s + "    " + ctrl + "Search(page: $page, pageSize: $pageSize, data: $data) {\n";
+  s = s + "      totalCounts items { \n";
+  s = s + "        " + sel + "\n";
+  s = s + "      } \n";
+  s = s + "    }\n";
+  s = s + "  }`\n";
+  s = s + "\n";
+  s = s + "  return getLocalGraphql(search" + C + "Query, {\n";
+  s = s + "    page,\n";
+  s = s + "    pageSize,\n";
+  s = s + "    data\n";
+  s = s + "  })\n";
+  s = s + "}\n";
+  s = s + "\n";
+  s = s + "export const add" + C + "Service = (data: any) => {\n";
+  s = s + "  const { " + f_names + " } = data\n";
+  s = s + "\n";
+  s = s + "  const add" + C + "Query = `mutation ($data: " + C + "AddInput) { " + ctrl + "Add(data: $data) }`\n";
+  s = s + "\n";
+  s = s + "  return getLocalGraphql(add" + C + "Query, {\n";
+  s = s + "    data\n";
+  s = s + "  })\n";
+  s = s + "}\n";
+  s = s + "\n";
+  s = s + "export const update" + C + "Service = (id: number, data: any) => {\n";
+  s = s + "  const { " + f_names + " } = data\n";
+  s = s + "\n";
+  s = s + "  const update" + C + "Query = `mutation ($id: Int, $data: " + C + "AddInput) { " + ctrl + "Update(id: $id, data: $data) }`\n";
+  s = s + "\n";
+  s = s + "  return getLocalGraphql(update" + C + "Query, {\n";
+  s = s + "    id,\n";
+  s = s + "    data\n";
+  s = s + "  })\n";
+  s = s + "}\n";
+  s = s + "\n";
+  s = s + "export const delete" + C + "Service = (id: number) => {\n";
+  s = s + "  const delete" + C + "Query = `mutation ($id: Int) { " + ctrl + "Delete(id: $id) }`\n";
+  s = s + "\n";
+  s = s + "  return getLocalGraphql(delete" + C + "Query, {\n";
+  s = s + "    id\n";
+  s = s + "  })\n";
+  s = s + "}\n";
+  return s;
+}
+
+// 查询字段：排除 create_date / update_date（对齐 nsgm）
+func select_fields(fs, n: int): string {
+  let out = [];
+  let i = 0;
+  while (i < n) {
+    let nm = m.fname(fs[i]);
+    if (nm != "create_date" && nm != "update_date") { push(out, nm); }
+    i = i + 1;
+  }
+  return join(out, " ");
+}
+
+// 指定下标集合的字段名（逗号分隔）
+func names(fs, idx) {
+  let out = [];
+  let i = 0;
+  let k = len(idx);
+  while (i < k) {
+    push(out, m.fname(fs[idx[i]]));
+    i = i + 1;
+  }
+  return join(out, ", ");
+}

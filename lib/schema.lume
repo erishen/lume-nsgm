@@ -1,0 +1,80 @@
+// schema.lume — GraphQL schema 生成器（对照 nsgm src/generators/schema-generator.ts）
+import "model.lume" as m;
+
+export func gen_schema(ctrl: string, fs, n: int): string {
+  let C = m.cap(ctrl);
+  let P = C + "s";
+  let type_fields = join(field_lines(fs, n), "\n");
+  let input_fields = join(field_lines_idx(fs, m.form_idx(fs, n)), "\n");
+  let search_fields = search_lines(fs, n);
+
+  let s = "module.exports = {\n";
+  s = s + "    query: `\n";
+  s = s + "        " + ctrl + "(page: Int, pageSize: Int): " + P + "\n";
+  s = s + "        " + ctrl + "Get(id: Int): " + C + "\n";
+  s = s + "        " + ctrl + "BatchGet(ids: [Int]): [" + C + "]\n";
+  s = s + "        " + ctrl + "Search(page: Int, pageSize: Int, data: " + C + "SearchInput): " + P + "\n";
+  s = s + "    `,\n";
+  s = s + "    mutation: `\n";
+  s = s + "        " + ctrl + "Add(data: " + C + "AddInput): Int\n";
+  s = s + "        " + ctrl + "BatchAdd(datas: [" + C + "AddInput]): Int\n";
+  s = s + "        " + ctrl + "Update(id: Int, data: " + C + "AddInput): Boolean\n";
+  s = s + "        " + ctrl + "Delete(id: Int): Boolean\n";
+  s = s + "        " + ctrl + "BatchDelete(ids: [Int]): Boolean\n";
+  s = s + "    `,\n";
+  s = s + "    subscription: ``,\n";
+  s = s + "    type: `\n";
+  s = s + "        type " + C + " {\n";
+  s = s + type_fields + "\n";
+  s = s + "        }\n";
+  s = s + "\n";
+  s = s + "        type " + P + " {\n";
+  s = s + "            totalCounts: Int\n";
+  s = s + "            items: [" + C + "]\n";
+  s = s + "        }\n";
+  s = s + "\n";
+  s = s + "        input " + C + "AddInput {\n";
+  s = s + input_fields + "\n";
+  s = s + "        }\n";
+  s = s + "\n";
+  s = s + "        input " + C + "SearchInput {\n";
+  s = s + search_fields + "\n";
+  s = s + "        }\n";
+  s = s + "    `\n";
+  s = s + "};";
+  return s;
+}
+
+// 非系统字段的 schema 行（缩进对齐 nsgm 模板的 12 空格）
+func field_lines(fs, n: int) {
+  let idx = m.non_system_idx(fs, n);
+  let out = [];
+  let i = 0;
+  let k = len(idx);
+  while (i < k) {
+    let f = fs[idx[i]];
+    push(out, "            " + m.fname(f) + ": " + m.gql_type(m.ftype(f)));
+    i = i + 1;
+  }
+  return out;
+}
+
+// 指定下标集合的 schema 行（form 字段）
+func field_lines_idx(fs, idx) {
+  let out = [];
+  let i = 0;
+  let k = len(idx);
+  while (i < k) {
+    let f = fs[idx[i]];
+    push(out, "            " + m.fname(f) + ": " + m.gql_type(m.ftype(f)));
+    i = i + 1;
+  }
+  return out;
+}
+
+// 搜索字段行（无搜索字段时回退 name: String）
+func search_lines(fs, n: int): string {
+  let idx = m.search_idx(fs, n);
+  if (len(idx) == 0) { return "            name: String"; }
+  return join(field_lines_idx(fs, idx), "\n");
+}

@@ -1,0 +1,29 @@
+// sql.lume — SQL 生成器（对照 nsgm src/generators/sql-generator.ts）
+import "model.lume" as m;
+
+export func gen_sql(ctrl: string, fs, n: int, db: string): string {
+  let s = "CREATE DATABASE IF NOT EXISTS " + db + " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n";
+  s = s + "\n";
+  s = s + "use " + db + ";\n";
+  s = s + "\n";
+  s = s + "CREATE TABLE IF NOT EXISTS `" + ctrl + "` (\n";
+  let i = 0;
+  while (i < n) {
+    if (i > 0) { s = s + ",\n"; }
+    s = s + field_def(fs[i]);
+    i = i + 1;
+  }
+  s = s + ",\n";
+  s = s + "  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;";
+  return s;
+}
+
+func field_def(f): string {
+  let s = "  `" + m.fname(f) + "` " + m.sql_type(f);
+  s = s + m.sql_not_null(f);
+  if (m.fauto(f) == 1) { s = s + " AUTO_INCREMENT"; }
+  s = s + m.sql_default(f);
+  let c = m.fcomment(f);
+  if (c != "") { s = s + " COMMENT '" + c + "'"; }
+  return s;
+}

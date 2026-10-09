@@ -1,0 +1,24 @@
+{
+  "db": "crm_demo",
+  "out": "./gen",
+  "modules": [
+    {
+      "name": "user",
+      "fields": [
+        { "name": "id", "type": "integer", "required": true, "primary": true, "auto": true, "system": true, "showInList": true, "showInForm": false, "searchable": false, "comment": "ID" },
+        { "name": "name", "type": "varchar", "length": 255, "required": true, "primary": false, "auto": false, "system": false, "showInList": true, "showInForm": true, "searchable": true, "comment": "姓名" },
+        { "name": "email", "type": "varchar", "length": 255, "required": false, "primary": false, "auto": false, "system": false, "showInList": true, "showInForm": true, "searchable": true, "comment": "邮箱" },
+        { "name": "create_date", "type": "timestamp", "required": false, "primary": false, "auto": false, "system": true, "showInList": true, "showInForm": false, "searchable": false, "comment": "创建时间" }
+      ]
+    },
+    {
+      "name": "order",
+      "fields": [
+        { "name": "id", "type": "integer", "required": true, "primary": true, "auto": true, "system": true, "showInList": true, "showInForm": false, "searchable": false, "comment": "ID" },
+        { "name": "order_no", "type": "varchar", "length": 64, "required": true, "primary": false, "auto": false, "system": false, "showInList": true, "showInForm": true, "searchable": true, "comment": "订单号" },
+        { "name": "amount", "type": "decimal", "required": true, "primary": false, "auto": false, "system": false, "showInList": true, "showInForm": true, "searchable": false, "comment": "金额" },
+        { "name": "create_date", "type": "timestamp", "required": false, "primary": false, "auto": false, "system": true, "showInList": true, "showInForm": false, "searchable": false, "comment": "创建时间" }
+      ]
+    }
+  ]
+}

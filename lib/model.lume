@@ -1,0 +1,117 @@
+// model.lume — 字段模型与类型映射（对照 nsgm src/generators/base-generator.ts）
+//
+// 字段 JSON 约定（example-config.json modules[].fields[]）：
+//   { "name", "type", "length", "required", "primary", "auto",
+//     "system", "comment", "showInList", "showInForm", "searchable" }
+// 缺失属性均有默认值，安全读取。
+
+export func cap(s: string): string {
+  return upper(substr(s, 0, 1)) + substr(s, 1);
+}
+
+// ---- 字段属性读取（JSON map，带默认值）----
+
+export func fname(f): string { return get(f, "name", ""); }
+export func ftype(f): string { return get(f, "type", "varchar"); }
+export func flen(f): string { return str(get(f, "length", 255)); }
+export func fcomment(f): string { return get(f, "comment", ""); }
+
+export func fbool(f, key: string): int {
+  let v = get(f, key, false);
+  if (v == true) { return 1; }
+  return 0;
+}
+
+export func frequired(f): int { return fbool(f, "required"); }
+export func fprimary(f): int { return fbool(f, "primary"); }
+export func fauto(f): int { return fbool(f, "auto"); }
+export func fsystem(f): int { return fbool(f, "system"); }
+export func fshow_list(f): int { return fbool(f, "showInList"); }
+export func fshow_form(f): int { return fbool(f, "showInForm"); }
+export func fsearchable(f): int { return fbool(f, "searchable"); }
+
+// ---- 过滤辅助（返回下标数组；lume 无 filter 下标版，用循环收集）----
+
+// 非系统字段下标
+export func non_system_idx(fs, n: int) {
+  let out = [];
+  let i = 0;
+  while (i < n) {
+    if (fsystem(fs[i]) == 0) { push(out, i); }
+    i = i + 1;
+  }
+  return out;
+}
+
+// 表单字段下标（showInForm && !primary && !system）
+export func form_idx(fs, n: int) {
+  let out = [];
+  let i = 0;
+  while (i < n) {
+    if (fshow_form(fs[i]) == 1 && fprimary(fs[i]) == 0 && fsystem(fs[i]) == 0) { push(out, i); }
+    i = i + 1;
+  }
+  return out;
+}
+
+// 搜索字段下标
+export func search_idx(fs, n: int) {
+  let out = [];
+  let i = 0;
+  while (i < n) {
+    if (fsearchable(fs[i]) == 1) { push(out, i); }
+    i = i + 1;
+  }
+  return out;
+}
+
+// 列表显示字段下标（showInList && !system）
+export func list_idx(fs, n: int) {
+  let out = [];
+  let i = 0;
+  while (i < n) {
+    if (fshow_list(fs[i]) == 1 && fsystem(fs[i]) == 0) { push(out, i); }
+    i = i + 1;
+  }
+  return out;
+}
+
+// ---- 类型映射（对照 base-generator getGraphQLType / getSQLType）----
+
+export func gql_type(t: string): string {
+  if (t == "integer") { return "Int"; }
+  if (t == "decimal") { return "Float"; }
+  if (t == "boolean") { return "Boolean"; }
+  return "String";
+}
+
+export func sql_type(f): string {
+  let t = ftype(f);
+  if (t == "varchar") { return "varchar(" + flen(f) + ")"; }
+  if (t == "text") { return "text"; }
+  if (t == "integer") { return "integer"; }
+  if (t == "decimal") { return "decimal(10,2)"; }
+  if (t == "boolean") { return "boolean"; }
+  if (t == "date") { return "date"; }
+  if (t == "datetime") { return "datetime"; }
+  if (t == "timestamp") { return "TIMESTAMP(3)"; }
+  return "varchar(255)";
+}
+
+// 字段是否必填（SQL NOT NULL 判断；主键强制 NOT NULL）
+export func sql_not_null(f): string {
+  let req = frequired(f);
+  let pk = fprimary(f);
+  if (req == 1 || pk == 1) { return " NOT NULL"; }
+  return "";
+}
+
+// 默认值子句（对照 nsgm sql-generator 的默认值规则）
+export func sql_default(f): string {
+  let t = ftype(f);
+  let n = fname(f);
+  if (t == "timestamp" && n == "create_date") { return " DEFAULT CURRENT_TIMESTAMP(3)"; }
+  if (t == "timestamp" && n == "update_date") { return " DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)"; }
+  if (t == "varchar" && n != "id" && frequired(f) == 0) { return " DEFAULT ''"; }
+  return "";
+}

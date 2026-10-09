@@ -1,0 +1,20 @@
+// t2.lume — M1 模块验证：service / resolver / page
+import "../lib/model.lume" as m;
+import "../lib/service.lume" as service;
+import "../lib/resolver.lume" as resolver;
+import "../lib/page.lume" as page;
+
+let fs = [
+  { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "" },
+  { "name": "name", "type": "varchar", "required": 1, "primary": 0, "auto": 0, "comment": "姓名" },
+  { "name": "email", "type": "varchar", "required": 0, "primary": 0, "auto": 0, "comment": "邮箱" },
+  { "name": "create_date", "type": "date", "required": 0, "primary": 0, "auto": 0, "comment": "" }
+];
+let n = len(fs);
+
+print("===== SERVICE =====");
+print(service.gen_service("user", fs, n));
+print("===== RESOLVER =====");
+print(resolver.gen_resolver("user", fs, n));
+print("===== PAGE =====");
+print(page.gen_page("user", fs, n));
