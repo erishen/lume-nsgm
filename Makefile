@@ -1,6 +1,7 @@
 # lume-nsgm — 用 lume 实现的 nsgm 生成器引擎（TS 全栈 CRUD 生成器）
 
-LUME = E:/Workspace/lume-core/bin/lume-core
+include .env
+LUME ?= $(LUME_CORE_BIN)
 TARGET = main.lume
 
 .PHONY: run dev init check clean
@@ -21,4 +22,4 @@ check:
 	$(LUME) --check tests/t3.lume
 
 clean:
-	rmdir /s /q gen 2>nul || (rd /s /q gen 2>nul & exit 0)
+	rm -rf gen
