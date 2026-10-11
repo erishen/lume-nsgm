@@ -26,9 +26,65 @@ lume-nsgm/
     └── t3.lume          # 模板引擎验证（each/if/变量替换）
 ```
 
+## 前置条件：安装 lume-core
+
+lume-nsgm 本身只是一堆 `.lume` 脚本和模板，**运行它需要一个 lume-core 运行时**（编译器 / CLI 二进制）。lume-core 是自研的单文件 C11 工程，除 libc（探测到 `llvm-config` 时再链 libLLVM）外不依赖任何东西，不需要 node / pnpm / SQLite。
+
+### 方式一：一键安装（推荐）
+
+按平台下载预编译 tarball，二进制落到 `~/.local/bin/lume-core`（examples + docs 落到 `~/.local/share/lume-core`）：
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/erishen/lume-core/main/install.sh | sh
+```
+
+可用环境变量覆盖（在管道命令前 `export`）：
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `LUME_CORE_VERSION` | `latest` | 要装的版本 tag |
+| `LUME_CORE_PREFIX`  | `$HOME/.local` | 安装根目录（`$PREFIX/bin`） |
+| `LUME_CORE_SHA256`  | — | tarball 的预期 sha256（设置后才校验） |
+| `LUME_CORE_REPO`    | `erishen/lume-core` | 拉取所用的 GitHub 仓库 |
+
+### 方式二：从源码构建
+
+依赖：一个 C11 编译器（`cc`）；若要原生编译能力 `--compile-llvm`，`PATH` 里需有 `llvm-config`（macOS 上 brew 装在 `/opt/homebrew/opt/llvm` 会被自动探测到）。**没有 LLVM 也能编出 `bin/lume-core`**，只是 `--compile-llvm` 不可用。
+
+```bash
+git clone <lume-core 仓库> lume-core && cd lume-core
+make           # -> bin/lume-core
+make check     # 自检：内置示例都过类型检查
+# 可选：sudo cp bin/lume-core /usr/local/bin/lume-core
+```
+
+Windows（**MSYS2 的 MINGW64 shell**，不是 MSVC）：
+
+```bash
+pacman -S base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-clang
+make           # -> bin/lume-core.exe
+```
+
+> Windows 上 `--watch` 与出站 HTTP 内建（`http_get` 等）暂不可用，但 lume-nsgm 只用解释器 + 文件 I/O + `read_stdin`，不受影响。
+
+### 让 lume-nsgm 找到运行时
+
+两种方式二选一：
+
+1. 把 `lume-core` 放进 `PATH`（方式一默认装到 `~/.local/bin`，需自己加进 `PATH`），然后直接 `make run`；
+2. 在 lume-nsgm 根目录新建 `.env`，写死本机绝对路径（Windows 用 `lume-core.exe`）：
+
+   ```bash
+   # lume-nsgm/.env
+   LUME_CORE_BIN=/Users/you/.local/bin/lume-core        # macOS / Linux
+   # LUME_CORE_BIN=E:/Workspace/lume-core/bin/lume-core.exe   # Windows
+   ```
+
+   Makefile 已用 `-include .env` + `$(or $(LUME_CORE_BIN),lume-core)` 解析：有 `.env` 优先用它的绝对路径，没有则回退到 PATH 上的 `lume-core`。
+
 ## 用法
 
-```powershell
+```bash
 # 批量：读 example-config.json 生成 user + order 两个模块
 make run
 
@@ -47,10 +103,12 @@ make clean
 
 也可以直接：
 
-```powershell
-E:/Workspace/lume-core/bin/lume-core main.lume example-config.json
-E:/Workspace/lume-core/bin/lume-core main.lume create order
-E:/Workspace/lume-core/bin/lume-core main.lume init product
+```bash
+# 不经过 make 的直调方式（需 lume-core 在 PATH，或用 .env 的 LUME_CORE_BIN 指路径）
+lume-core main.lume example-config.json
+lume-core main.lume create order
+lume-core main.lume init product
+# Windows：把 lume-core 换成 lume-core.exe（或写进 .env 的 LUME_CORE_BIN）
 ```
 
 生成产物落在 `./gen/`：
