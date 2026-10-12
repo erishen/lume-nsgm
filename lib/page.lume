@@ -18,7 +18,7 @@ export func gen_page(ctrl: string, fs, n: int): string {
     "cols": cols, "modal": modal,
     "search_hook": search_hook,
     "search_input": search_input(main_s),
-    "search_arg": search_arg(fs, search)
+    "search_arg": search_arg(fs, search, main_s)
   };
   let tpl_text = read_file("templates/page.tpl");
   if (tpl_text == null) { return "// ERROR: templates/page.tpl missing"; }
@@ -64,14 +64,17 @@ func main_search(fs, idx) {
   return m.fname(fs[idx[0]]);
 }
 
-// 搜索参数对象
-func search_arg(fs, idx) {
+// 搜索参数对象（合法表达式：主搜索字段 -> 对应的 search 状态，其余 -> ''）
+func search_arg(fs, idx, main_s) {
   if (len(idx) == 0) { return ""; }
   let out = [];
   let i = 0;
   let k = len(idx);
   while (i < k) {
-    push(out, m.fname(fs[idx[i]]));
+    let nm = m.fname(fs[idx[i]]);
+    let expr = "'" + nm + "': ''";
+    if (nm == main_s) { expr = "'" + nm + "': search" + m.cap(nm); }
+    push(out, expr);
     i = i + 1;
   }
   return join(out, ", ");

@@ -4,10 +4,13 @@
 LUME := $(or $(LUME_CORE_BIN),lume-core)
 TARGET = main.lume
 
-.PHONY: run dev init check test clean
+.PHONY: run base dev init check test clean
 
 run:
 	$(LUME) $(TARGET) example-config.json
+
+# run 的别名：cmd_config 现已自动生成可运行工程基座（scaffold/ + reducers + pages 路由）
+base: run
 
 dev:
 	$(LUME) $(TARGET) create user

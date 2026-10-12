@@ -1,0 +1,115 @@
+// base.lume — 输出一个可运行的 Next + GraphQL(Yoga) + MySQL 工程基座
+// 与 lib/scaffold.lume 的 write_tree 配合：write_tree 写逐模块文件，
+// 本文件负责写静态基座 + 按模块列表动态生成 redux/reducers.ts 与 pages/<module>.tsx。
+import "tpl.lume" as tpl;
+
+// 需要从 scaffold/ 复制的静态文件（路径相对于生成根 out）
+let STATIC_FILES = [
+  "package.json",
+  "tsconfig.json",
+  "next.config.js",
+  "next-env.d.ts",
+  ".env.example",
+  "server/index.js",
+  "server/graphql/index.js",
+  "server/utils/common.js",
+  "server/utils/validation.js",
+  "client/utils/fetch.ts",
+  "client/redux/store.ts",
+  "pages/_app.tsx",
+  "README.run.md"
+];
+
+// 复制静态基座文件（scaffold/ -> out/）
+export func copy_base(out: string): int {
+  let i = 0;
+  while (i < len(STATIC_FILES)) {
+    let f = STATIC_FILES[i];
+    let content = read_file("scaffold/" + f);
+    if (content != null) {
+      write_file(out + "/" + f, content);
+    } else {
+      print("WARN: scaffold/" + f + " missing");
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// 生成 client/redux/reducers.ts：聚合各模块 reducer
+export func gen_reducers(out: string, mods): int {
+  let imports = "";
+  let names = "";
+  let i = 0;
+  while (i < len(mods)) {
+    let m = mods[i];
+    let name = get(m, "name", "");
+    if (name != "") {
+      imports = imports + "import " + name + " from '@/redux/" + name + "/reducer'\n";
+      if (names != "") { names = names + ", "; }
+      names = names + name;
+    }
+    i = i + 1;
+  }
+  let content = imports + "\nexport default { " + names + " }\n";
+  write_file(out + "/client/redux/reducers.ts", content);
+  return 0;
+}
+
+// 生成 pages/<module>.tsx：薄壳转发到 client/components/<module>
+export func gen_page_routes(out: string, mods): int {
+  let i = 0;
+  while (i < len(mods)) {
+    let m = mods[i];
+    let name = get(m, "name", "");
+    if (name != "") {
+      let content = "export { default } from '@/components/" + name + "'\n";
+      write_file(out + "/pages/" + name + ".tsx", content);
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+// 生成 pages/index.tsx：导航到各模块
+export func gen_index(out: string, mods): int {
+  let items = "";
+  let i = 0;
+  while (i < len(mods)) {
+    let m = mods[i];
+    let name = get(m, "name", "");
+    if (name != "") {
+      items = items + "        <li key=\"" + name + "\"><Link href=\"/" + name + "\">" + name + "</Link></li>\n";
+    }
+    i = i + 1;
+  }
+  let content = "import Link from 'next/link'\n\nexport default function Home() {\n  return (\n    <div style={{ padding: 24 }}>\n      <h1>lume-nsgm 生成的项目</h1>\n      <ul>\n" + items + "      </ul>\n    </div>\n  )\n}\n";
+  write_file(out + "/pages/index.tsx", content);
+  return 0;
+}
+
+// 串联：建目录 -> 复制静态基座 -> 生成 reducers/page routes/index
+export func base_project(out: string, mods): int {
+  mkdir(out);
+  mkdir(out + "/server");
+  mkdir(out + "/server/utils");
+  mkdir(out + "/server/graphql");
+  mkdir(out + "/server/apis");
+  mkdir(out + "/server/schema");
+  mkdir(out + "/server/sql");
+  mkdir(out + "/client");
+  mkdir(out + "/client/utils");
+  mkdir(out + "/client/redux");
+  mkdir(out + "/client/components");
+  mkdir(out + "/client/service");
+  mkdir(out + "/client/styled");
+  mkdir(out + "/client/i18n");
+  mkdir(out + "/client/i18n/zh-CN");
+  mkdir(out + "/pages");
+
+  copy_base(out);
+  gen_reducers(out, mods);
+  gen_page_routes(out, mods);
+  gen_index(out, mods);
+  return 0;
+}

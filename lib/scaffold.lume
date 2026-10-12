@@ -34,27 +34,31 @@ export func gen_i18n(ctrl: string, fs, n: int): string {
   return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
 }
 
-// ---- 文件树写入 ----
+// ---- 文件树写入（运行布局：server + client，可直接被基座托管）----
 export func write_tree(out: string, ctrl: string, sql_text: string, schema_text: string,
   resolver_text: string, service_text: string, page_text: string,
   actions_text: string, reducer_text: string, styled_text: string, i18n_text: string): int {
-  mkdir(out + "/sql");
-  mkdir(out + "/schema");
-  mkdir(out + "/resolver");
-  mkdir(out + "/service");
-  mkdir(out + "/page/" + ctrl);
-  mkdir(out + "/redux/" + ctrl);
-  mkdir(out + "/styled");
-  mkdir(out + "/i18n/zh-CN");
+  // resolver 的 require('../../utils/common') 需落在 server/apis 下
+  mkdir(out + "/server/sql");
+  mkdir(out + "/server/schema");
+  mkdir(out + "/server/apis");
+  mkdir(out + "/client/service");
+  mkdir(out + "/client/components");
+  mkdir(out + "/client/components/" + ctrl);
+  mkdir(out + "/client/redux");
+  mkdir(out + "/client/redux/" + ctrl);
+  mkdir(out + "/client/styled");
+  mkdir(out + "/client/i18n/zh-CN");
 
-  write_file(out + "/sql/" + ctrl + ".sql", sql_text);
-  write_file(out + "/schema/" + ctrl + ".ts", schema_text);
-  write_file(out + "/resolver/" + ctrl + ".js", resolver_text);
-  write_file(out + "/service/" + ctrl + ".ts", service_text);
-  write_file(out + "/page/" + ctrl + "/index.tsx", page_text);
-  write_file(out + "/redux/" + ctrl + "/actions.ts", actions_text);
-  write_file(out + "/redux/" + ctrl + "/reducer.ts", reducer_text);
-  write_file(out + "/styled/" + ctrl + ".ts", styled_text);
-  write_file(out + "/i18n/zh-CN/" + ctrl + ".ts", i18n_text);
+  // schema 是 CommonJS module.exports，写成 .js 以便运行时 require
+  write_file(out + "/server/sql/" + ctrl + ".sql", sql_text);
+  write_file(out + "/server/schema/" + ctrl + ".js", schema_text);
+  write_file(out + "/server/apis/" + ctrl + ".js", resolver_text);
+  write_file(out + "/client/service/" + ctrl + ".ts", service_text);
+  write_file(out + "/client/components/" + ctrl + "/index.tsx", page_text);
+  write_file(out + "/client/redux/" + ctrl + "/actions.ts", actions_text);
+  write_file(out + "/client/redux/" + ctrl + "/reducer.ts", reducer_text);
+  write_file(out + "/client/styled/" + ctrl + ".ts", styled_text);
+  write_file(out + "/client/i18n/zh-CN/" + ctrl + ".ts", i18n_text);
   return 0;
 }

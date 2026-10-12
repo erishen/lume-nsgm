@@ -28,6 +28,7 @@ const Page = ({ {{ctrl}} }) => {
   const [isModalVisiable, setIsModalVisible] = useState(false)
   const [modalId, setModalId] = useState(0)
 {{search_hook}}  const [batchDelIds, setBatchDelIds] = useState([])
+  const [values, setValues] = useState<{ [k: string]: any }>({})
 
   useEffect(() => {
     dispatch(search{{C}}({ page: 0, pageSize }))
@@ -43,11 +44,13 @@ const Page = ({ {{ctrl}} }) => {
   }
 
   const openAdd = () => {
+    setValues({})
     setModalId(0)
     setIsModalVisible(true)
   }
 
   const openEdit = (record: any) => {
+    setValues({ ...record })
     setModalId(record.id)
     setIsModalVisible(true)
   }
@@ -64,6 +67,15 @@ const Page = ({ {{ctrl}} }) => {
   const onDelete = (record: any) => {
     dispatch(del{{C}}(record.id))
   }
+
+  const columns = [
+{{cols}}  { title: '操作', dataIndex: 'action', render: (_: any, record: any) => (
+    <Space>
+      <StyledButton onClick={() => openEdit(record)}>编辑</StyledButton>
+      <StyledButton danger onClick={() => onDelete(record)}>删除</StyledButton>
+    </Space>
+  ) },
+  ]
 
   return (
     <ConfigProvider>
@@ -83,7 +95,7 @@ const Page = ({ {{ctrl}} }) => {
       <Modal
         visible={isModalVisiable}
         onCancel={() => setIsModalVisible(false)}
-        onOk={() => handleOk({})}
+        onOk={() => handleOk(values)}
       >
         <ModalContainer>
 {{modal}}        </ModalContainer>
@@ -91,14 +103,5 @@ const Page = ({ {{ctrl}} }) => {
     </ConfigProvider>
   )
 }
-
-const columns = [
-{{cols}}  { title: '操作', dataIndex: 'action', render: (_: any, record: any) => (
-    <Space>
-      <StyledButton onClick={() => openEdit(record)}>编辑</StyledButton>
-      <StyledButton danger onClick={() => onDelete(record)}>删除</StyledButton>
-    </Space>
-  ) },
-]
 
 export default Page

@@ -6,7 +6,9 @@ import "tpl.lume" as tpl;
 export func gen_schema(ctrl: string, fs, n: int): string {
   let C = m.cap(ctrl);
   let P = C + "s";
-  let type_fields = join(field_lines(fs, n), "\n");
+  // 类型块必须含主键 id（id 被标 system 而排除在 field_lines 之外，否则
+  // GraphQL 不返回 id，前端编辑/删除拿不到 id）。约定主键为整型。
+  let type_fields = "            id: Int\n" + join(field_lines(fs, n), "\n");
   let input_fields = join(field_lines_idx(fs, m.form_idx(fs, n)), "\n");
   let search_fields = search_lines(fs, n);
   let ctx = {

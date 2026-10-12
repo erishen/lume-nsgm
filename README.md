@@ -19,11 +19,14 @@ lume-nsgm/
 │   ├── service.lume     # GraphQL 客户端 service 生成器（模板渲染）
 │   ├── resolver.lume    # GraphQL resolver 生成器（模板渲染）
 │   ├── page.lume        # Antd 页面生成器（模板渲染）
-│   └── scaffold.lume    # 文件树写入 + redux/styled/i18n 生成（模板渲染）
+│   ├── scaffold.lume    # 文件树写入 + redux/styled/i18n 生成（模板渲染）
+│   └── base.lume        # 可运行工程基座：复制 scaffold/ 静态壳 + reducers.ts + pages 路由
+├── scaffold/            # 工程基座静态模板（package.json / server / client / pages 壳）
 └── tests/
     ├── t1.lume          # model/sql/schema 验证
     ├── t2.lume          # service/resolver/page 验证
-    └── t3.lume          # 模板引擎验证（each/if/变量替换）
+    ├── t3.lume          # 模板引擎验证（each/if/变量替换）
+    └── t4.lume          # sql_default() 回归断言（main() 返回失败数即退出码）
 ```
 
 ## 前置条件：安装 lume-core
@@ -111,20 +114,50 @@ lume-core main.lume init product
 # Windows：把 lume-core 换成 lume-core.exe（或写进 .env 的 LUME_CORE_BIN）
 ```
 
-生成产物落在 `./gen/`：
+生成产物落在 `./gen/`（自 v0.4 起为**可直接运行的 Next.js 工程布局**，并自动附带工程基座）：
 
 ```
 gen/
-├── sql/{module}.sql            # 建库建表 SQL
-├── schema/{module}.ts          # GraphQL schema（query/mutation/type）
-├── resolver/{module}.js        # resolver（分页/Get/Search/Add/Update/Delete）
-├── service/{module}.ts         # GraphQL 客户端 service
-├── page/{module}/index.tsx     # Antd 列表页（搜索 + Modal 表单）
-├── redux/{module}/actions.ts
-├── redux/{module}/reducer.ts
-├── styled/{module}.ts
-└── i18n/zh-CN/{module}.ts
+├── package.json / tsconfig.json / next.config.js / .env.example
+├── server/
+│   ├── index.js                 # Express + mysql2 连接池 + GraphQL(Yoga) 挂载
+│   ├── graphql/index.js         # 聚合各模块 schema/resolver 装配可执行 schema
+│   ├── schema/{module}.js       # GraphQL schema 片段（query/mutation/type）
+│   ├── apis/{module}.js         # resolver（分页/Get/Search/Add/Update/Delete）
+│   ├── sql/{module}.sql         # 建库建表 SQL
+│   └── utils/                   # common.js(executeQuery) / validation.js
+├── client/
+│   ├── components/{module}/index.tsx   # Antd 列表页（搜索 + Modal 表单）
+│   ├── service/{module}.ts      # GraphQL 客户端 service
+│   ├── redux/store.ts + reducers.ts + {module}/
+│   ├── styled/{module}.ts
+│   ├── i18n/zh-CN/{module}.ts
+│   └── utils/fetch.ts           # getLocalGraphql 封装
+└── pages/
+    ├── _app.tsx / index.tsx     # 应用壳 + 模块导航
+    └── {module}.tsx             # 薄壳转发到 client/components/{module}
 ```
+
+## 运行生成的项目
+
+`make run`（或 `make base`）现在输出的不再只是模块碎片，而是一个**自带工程壳的可运行项目**：
+
+```bash
+cd gen
+
+# 1) 配置数据库连接
+cp .env.example .env        # 填 DB_HOST/DB_USER/DB_PASSWORD/DB_NAME
+
+# 2) 建库建表（把生成的 SQL 应用到 MySQL）
+mysql -u root -p < server/sql/*.sql
+
+# 3) 安装依赖并启动
+npm install
+npm run dev                 # Next.js 前端 http://localhost:3000
+node server/index.js        # GraphQL + REST 服务 http://localhost:4000
+```
+
+> 说明：沙箱/CI 环境无法 `npm install` 实测，基座的依赖清单与装配逻辑对照 nsgm 的活体工程复刻；如遇依赖版本问题优先核对 `gen/package.json` 与 nsgm 根目录 `package.json` 的差异。
 
 ## 字段定义（example-config.json）
 

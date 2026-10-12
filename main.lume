@@ -10,6 +10,7 @@ import "lib/service.lume" as service;
 import "lib/resolver.lume" as resolver;
 import "lib/page.lume" as page;
 import "lib/scaffold.lume" as sc;
+import "lib/base.lume" as base;
 
 func gen_one(ctrl: string, fs, n: int, db: string, out: string): int {
   let sql_text = sql.gen_sql(ctrl, fs, n, db);
@@ -45,6 +46,8 @@ func cmd_create(args): int {
     { "name": "create_date", "type": "timestamp", "required": 0, "primary": 0, "auto": 0, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "创建时间" }
   ];
   gen_one(ctrl, fs, len(fs), db, out);
+  base.base_project(out, [{ "name": ctrl }]);
+  print("runnable project scaffolded at " + out + " (see README.run.md)");
   return 0;
 }
 
@@ -79,6 +82,7 @@ func cmd_init(args): int {
     }
   }
   gen_one(ctrl, fs, len(fs), db, out);
+  base.base_project(out, [{ "name": ctrl }]);
   print("init done: " + ctrl + " (" + str(len(fs)) + " fields)");
   return 0;
 }
@@ -90,6 +94,7 @@ func cmd_config(path: string): int {
   let db = get(cfg, "db", "crm_demo");
   let out = get(cfg, "out", "./gen");
   let mods = get(cfg, "modules", []);
+  base.base_project(out, mods);
   let i = 0;
   while (i < len(mods)) {
     let mod = mods[i];
