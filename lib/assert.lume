@@ -1,0 +1,36 @@
+// lib/assert.lume — 轻量断言库（print 报告 + 返回失败计数）
+//
+// 约定：每个 assert_* 成功返回 0、失败返回 1，并在 stdout 打印
+//   ok   - <label>      或      FAIL - <label> :: <detail>
+// 调用方在 main() 里累加返回值，main() 返回失败数即进程退出码，
+// 这样 `make test` 能在断言失败时以非零退出码捕获回归。
+
+// haystack 必须包含 needle
+export func assert_contains(haystack: string, needle: string, label: string): int {
+  if (contains(haystack, needle)) {
+    print("ok   - " + label);
+    return 0;
+  }
+  print("FAIL - " + label + " :: expected substring not found: " + needle);
+  return 1;
+}
+
+// haystack 必须不包含 needle（防止 DEFAULT NULL DEFAULT '' 这类双重默认非法 SQL 回归）
+export func assert_not_contains(haystack: string, needle: string, label: string): int {
+  if (!contains(haystack, needle)) {
+    print("ok   - " + label);
+    return 0;
+  }
+  print("FAIL - " + label + " :: forbidden substring present: " + needle);
+  return 1;
+}
+
+// 通用布尔断言
+export func assert_true(cond, label: string): int {
+  if (cond) {
+    print("ok   - " + label);
+    return 0;
+  }
+  print("FAIL - " + label);
+  return 1;
+}

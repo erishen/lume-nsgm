@@ -1,0 +1,40 @@
+// tests/t4.lume — sql_default() 回归测试
+//
+// 锁定 model.sql_default() 经 sql.field_ctx 接进生成器后的行为：
+//   1) create_date (timestamp, system) -> DEFAULT CURRENT_TIMESTAMP(3)
+//   2) update_date (timestamp, system) -> DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE ...
+//   3) 非必填 varchar (非 id)          -> DEFAULT ''
+//   4) 互斥默认子句，禁止 DEFAULT NULL DEFAULT '' 这类双重默认非法 SQL
+//   5) 主键声明存在
+// main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
+
+import "../lib/sql.lume" as sql;
+import "../lib/assert.lume" as a;
+
+func main() {
+  // 复刻 nsgm 用户模块字段集
+  let fs = [
+    { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "" },
+    { "name": "name", "type": "varchar", "required": 1, "comment": "姓名" },
+    { "name": "email", "type": "varchar", "comment": "邮箱" },
+    { "name": "create_date", "type": "timestamp", "system": 1, "comment": "" },
+    { "name": "update_date", "type": "timestamp", "system": 1, "comment": "" }
+  ];
+  let out = sql.gen_sql("user", fs, len(fs), "crm_demo");
+
+  let f = 0;
+  f = f + a.assert_contains(out, "`create_date` TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3)", "create_date 自动时间戳默认");
+  f = f + a.assert_contains(out, "`update_date` TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)", "update_date 自动更新时间戳");
+  f = f + a.assert_contains(out, "`email` varchar(255) DEFAULT ''", "非必填 varchar 默认空串");
+  f = f + a.assert_not_contains(out, "DEFAULT NULL DEFAULT", "无双重 DEFAULT 子句");
+  f = f + a.assert_not_contains(out, "DEFAULT '' DEFAULT", "无重复空串默认");
+  f = f + a.assert_contains(out, "PRIMARY KEY", "含主键声明");
+
+  if (f == 0) {
+    print("ALL PASS (sql_default regression: " + str(len(fs)) + " fields checked)");
+  } else {
+    print(str(f) + " ASSERTION(S) FAILED");
+  }
+  return f;
+}
+main();
