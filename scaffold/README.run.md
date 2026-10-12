@@ -2,18 +2,20 @@
 
 `lume-nsgm` 通过 `make run`（读 `example-config.json`）生成一套**以 lume 为底**
 的全栈工程，落在 `./gen`：**React 前端（web/）** + SSR 回退页面 + REST API +
-SQLite 存储。服务端运行时只需 lume 宿主二进制；前端开发/构建用 pnpm（Vite + React）。
+SQLite 存储。服务端运行时只需 **lume-core 单二进制**（0.6.0+ 自带
+`server`/`route`/`run`、`sql_query`/`sql_write` 内建、docroot 静态与 `:name`
+动态路由）；前端开发/构建用 pnpm（Vite + React）。
 
-## 1. 准备 lume 宿主
+## 1. 准备 lume-core
 
-生成代码使用 lume 宿主的服务端能力（`server`/`route`/`run` 与
-`sql_query`/`sql_write` 内建），**lume-core（纯解释器）跑不了它**。
+生成代码使用 lume-core 的服务端能力（`server`/`route`/`run` 与
+`sql_query`/`sql_write` 内建）与 docroot 静态文件服务。
 
-从 lume 仓库构建（或用已装好的 `lume`）：
+从 lume-core 仓库构建（或用已装好的 `lume-core`）：
 
 ```bash
-git clone <lume 仓库> lume && cd lume
-make            # -> bin/lume
+git clone <lume-core 仓库> lume-core && cd lume-core
+make            # -> bin/lume-core
 ```
 
 ## 2. 启动
@@ -26,11 +28,11 @@ pnpm install                 # packageManager 已钉 pnpm@12.11.2，corepack 自
 pnpm dev                     # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ```
 
-另开终端启动 lume 服务端（API + SSR 回退）：
+另开终端启动 lume-core 服务端（API + SSR 回退）：
 
 ```bash
 cd gen
-../lume/bin/lume app.lume    # 或 lume 在 PATH 上：lume app.lume
+../lume-core/bin/lume-core app.lume    # 或 lume-core 在 PATH 上：lume-core app.lume
 ```
 
 - 每模块生成 `web/src/pages/<Ctrl>Page.tsx`：列表（搜索/分页/删除 confirm）+
@@ -44,7 +46,7 @@ cd gen
 
 ```bash
 cd gen
-../lume/bin/lume app.lume       # 或 lume 在 PATH 上：lume app.lume
+../lume-core/bin/lume-core app.lume       # 或 lume-core 在 PATH 上：lume-core app.lume
 ```
 
 - 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`）
@@ -59,7 +61,7 @@ cd gen
 
 | 环境变量 | 默认 | 含义 |
 |---|---|---|
-| `NSGM_DB` | `data/app.db` | SQLite 文件路径；`postgres://` / `mysql://` DSN 需宿主编译对应后端 |
+| `NSGM_DB` | `data/app.db` | SQLite 文件路径；内建仅支持 SQLite（不解析 postgres/mysql DSN） |
 | `PORT`（写死在 app.lume 的 server 块） | `8081` | 监听端口，直接改 `app.lume` |
 
 ## 4. 目录结构（生成后）
@@ -84,6 +86,5 @@ gen/
 └── data/app.db            # SQLite 库（运行后生成）
 ```
 
-> 说明：SSR 表单按 lume 宿主"GET 走 master 快速路径"的并发模型设计为
-> GET 提交（与 examples/demo.lume 的 GET-only 状态路由一致）；程序化写操作
-> 走 POST + JSON body（`json()` 解析，无需 URL 解码）。
+> 说明：SSR 表单设计为 GET 提交（`req.query_params` 已 URL 解码，可直接读）；
+> 程序化写操作走 POST + JSON body（`json()` 解析，无需 URL 解码）。

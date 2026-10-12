@@ -1,8 +1,8 @@
 # lume-nsgm
 
-用 **lume**（自研语言，lume-core 运行时）实现的 **nsgm** 生成器引擎复刻版：输入模块字段定义（JSON），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API），用 lume 宿主一条命令运行。
+用 **lume**（自研语言，lume-core 运行时）实现的 **nsgm** 生成器引擎复刻版：输入模块字段定义（JSON），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API），`lume-core` 单二进制一条命令运行。
 
-> 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**，产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume 宿主应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建），零 Node 依赖；生成器侧仍用 lume-core 解释执行。
+> 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**，产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume-core 应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建 + docroot 静态 + `:name` 动态路由，core ≥ 0.6.0），零 Node 依赖；生成器侧同样用 lume-core 解释执行。
 
 ## 目录
 
@@ -114,7 +114,7 @@ lume-core main.lume init product
 # Windows：把 lume-core 换成 lume-core.exe（或写进 .env 的 LUME_CORE_BIN）
 ```
 
-生成产物落在 `./gen/`（**以 lume 为底的可运行工程**：lume 宿主跑服务端 + React 前端）：
+生成产物落在 `./gen/`（**以 lume 为底的可运行工程**：lume-core 跑服务端 + React 前端）：
 
 ```
 gen/
@@ -137,13 +137,13 @@ gen/
 
 ## 运行生成的项目
 
-`make run`（或 `make base`）输出的即**以 lume 为底的可运行项目**，运行时只需 lume 宿主二进制（带 `server`/`route`/`run` 与 `sql_query`/`sql_write` 内建；注意 lume-core 纯解释器跑不了它）：
+`make run`（或 `make base`）输出的即**以 lume 为底的可运行项目**，运行时只需 lume-core 二进制 ≥ 0.6.0（自带 `server`/`route`/`run`、`sql_query`/`sql_write` 内建、docroot 静态与 `:name` 动态路由）：
 
 ```bash
 cd gen
 
-# lume 宿主二进制（从 lume 仓库 make 得 bin/lume；或写 lume-nsgm/.env 的 LUME_BIN 绝对路径）
-lume app.lume
+# lume-core 二进制（从 lume-core 仓库 make 得 bin/lume-core）
+lume-core app.lume
 
 # React 前端（主 UI）：另开终端
 cd web
@@ -151,13 +151,15 @@ pnpm install        # packageManager 已钉 pnpm@12.11.2，corepack 自动接管
 pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ```
 
-- 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`；`env NSGM_DB` 可换库文件，`postgres://`/`mysql://` DSN 需宿主编译对应后端）
+- 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`；`env NSGM_DB` 可换库文件；内建仅支持 SQLite）
 - **React 前端（主 UI）**： `pnpm dev` 起在 :5173，每模块生成 `<Ctrl>Page.tsx`（搜索/分页/受控表单/删除 confirm/时间列 `fmtTime` 本地化），hash 路由导航；`pnpm build && pnpm preview` 即生产预览（同样带 /api 代理，免 CORS）
 - SSR 回退页面： http://localhost:8081/ → 各模块列表页（搜索/新增/编辑/删除均为 SSR 表单，无需 JS）
 - JSON API： `GET /api/{module}?page=0&pageSize=20&q=关键字`、`GET /api/{module}/:id`、`POST /api/{module}`（JSON body 新增）、`POST /api/{module}/update/:id`、`POST /api/{module}/delete/:id`（React 前端消费的正是这套 API）
-- 在 lume-nsgm 根目录可 `make serve`（读 `.env` 的 `LUME_BIN`）
+- 在 lume-nsgm 根目录可 `make serve`（读 `.env` 的 `LUME_BIN`，默认 `lume-core`）
 
-> 说明：SSR 表单按 lume 宿主"GET 走 master 快速路径"的并发模型设计为 GET 提交（与 lume 仓 examples/demo.lume 的 GET-only 状态路由一致）；程序化写操作走 POST + JSON body。沙箱/CI 无法起长驻服务实测浏览链路，API 行为已 curl 实测。
+> 说明：SSR 表单设计为 GET 提交（`req.query_params` 已 URL 解码，可直接读）；
+> 程序化写操作走 POST + JSON body（`json()` 解析）。API 行为已 curl 实测
+> （lume-core 底座 31 项探针全过：SSR/静态/CRUD/动态路由/搜索/decimal/校验）。
 
 ## 字段定义（example-config.json）
 

@@ -1,8 +1,8 @@
 // db.lume — SQLite 存取辅助（lume-nsgm 生成项目的静态基座）
 //
-// sql_query/sql_write 由 lume 宿主的 db_layer 提供：? 占位符参数绑定
-// （值永不进 SQL 字符串）。SQLite 文件路径即 DSN；postgres:// 与
-// mysql:// DSN 在编译了对应后端的宿主上同样可用（db_layer 多后端）。
+// sql_query/sql_write 由 lume-core（0.6.0+）内建提供：? 占位符参数绑定
+// （值永不进 SQL 字符串）。SQLite 文件路径即 DSN；仅支持 SQLite
+// （postgres/mysql 不在 core 内建范围内）。
 
 // 库文件路径：env NSGM_DB 可覆盖，默认 data/app.db（相对生成项目根）
 let DSN = "data/app.db";

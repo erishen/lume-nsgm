@@ -94,7 +94,7 @@ export func gen_app_entry(out: string, mods): int {
     i = i + 1;
   }
   let content = "// app.lume — lume-nsgm 生成入口（勿手改）\n"
-    + "// 运行：lume app.lume  （需要 lume 宿主：server/route/run 与 sql 内建）\n"
+    + "// 运行：lume-core app.lume  （lume-core 0.6.0+ 自带 server/route/run、sql 内建与 docroot 静态）\n"
     + "server {\n  port = 8081;\n  workers = 4;\n  docroot = \"./www\";\n}\n\n"
     + "import \"lib/ui.lume\" as ui;\n"
     + "import \"lib/db.lume\" as db;\n"
