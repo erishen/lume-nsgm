@@ -1,20 +1,44 @@
-// t2.lume — M1 模块验证：service / resolver / page
-import "../lib/model.lume" as m;
-import "../lib/service.lume" as service;
-import "../lib/resolver.lume" as resolver;
-import "../lib/page.lume" as page;
+// tests/t2.lume — 模块生成器（modlume.gen_module）路由与页面层回归断言
+// 锁：5 条 SSR 页面路由 + 5 条 JSON API 路由全部注册、必填校验与输出转义存在、
+// 运行期查询一律 ? 参数绑定。main() 返回失败数即退出码。
+import "../lib/modlume.lume" as modlume;
+import "../lib/assert.lume" as a;
 
 let fs = [
-  { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "" },
-  { "name": "name", "type": "varchar", "required": 1, "primary": 0, "auto": 0, "comment": "姓名" },
-  { "name": "email", "type": "varchar", "required": 0, "primary": 0, "auto": 0, "comment": "邮箱" },
-  { "name": "create_date", "type": "date", "required": 0, "primary": 0, "auto": 0, "comment": "" }
+  { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "ID" },
+  { "name": "name", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "姓名" },
+  { "name": "email", "type": "varchar", "showInList": 1, "showInForm": 1, "comment": "邮箱" }
 ];
-let n = len(fs);
 
-print("===== SERVICE =====");
-print(service.gen_service("user", fs, n));
-print("===== RESOLVER =====");
-print(resolver.gen_resolver("user", fs, n));
-print("===== PAGE =====");
-print(page.gen_page("user", fs, n));
+let mod = modlume.gen_module("user", fs, len(fs));
+
+let fails = 0;
+
+// SSR 页面路由（GET 走宿主 master 快速路径）
+fails = fails + a.assert_contains(mod, "get \"/user\", func(req)", "t2: SSR list route registered");
+fails = fails + a.assert_contains(mod, "get \"/user/new\", func(req)", "t2: SSR new-form route registered");
+fails = fails + a.assert_contains(mod, "get \"/user/edit/:id\", func(req)", "t2: SSR edit route with :id segment");
+fails = fails + a.assert_contains(mod, "get \"/user/save\", func(req)", "t2: SSR form-submit (GET) route registered");
+fails = fails + a.assert_contains(mod, "get \"/user/del/:id\", func(req)", "t2: SSR delete route registered");
+
+// JSON API 路由（程序化写走 POST + JSON body）
+fails = fails + a.assert_contains(mod, "get \"/api/user\", func(req)", "t2: JSON list route registered");
+fails = fails + a.assert_contains(mod, "get \"/api/user/:id\", func(req)", "t2: JSON get-one route registered");
+fails = fails + a.assert_contains(mod, "post \"/api/user\", func(req)", "t2: JSON add route registered");
+fails = fails + a.assert_contains(mod, "post \"/api/user/update/:id\", func(req)", "t2: JSON update route registered");
+fails = fails + a.assert_contains(mod, "post \"/api/user/delete/:id\", func(req)", "t2: JSON delete route registered");
+
+// 校验与转义：必填缺失提示、ui.esc 防 XSS、查询 ? 参数绑定
+fails = fails + a.assert_contains(mod, "必填项缺失: ", "t2: required-field validation message present");
+fails = fails + a.assert_contains(mod, "ui.esc(", "t2: output escaped via ui.esc");
+fails = fails + a.assert_contains(mod, "LIMIT ? OFFSET ?", "t2: pagination uses bound params");
+fails = fails + a.assert_contains(mod, "LIKE ?", "t2: search uses bound params");
+fails = fails + a.assert_not_contains(mod, "queryValues", "t2: no legacy TS-era service residue");
+
+func main(): int {
+  if (fails == 0) { print("ALL PASS (t2: modlume routes & pages)"); }
+  else { print(str(fails) + " ASSERTION(S) FAILED"); }
+  return fails;
+}
+
+main();

@@ -1,6 +1,6 @@
 // scaffold.lume — 文件树写入（lume 为底的运行布局）
-// 旧版 redux/styled/i18n 前端生成器已随全 lume 栈改造移除（git 历史可查）；
-// service/resolver/page/schema 生成器仍保留（tests/t1-t2 的字符串生成回归）。
+// 旧版 TS 时代生成器（schema/service/resolver/page 及 redux/styled/i18n 模板）
+// 已随全 lume 栈改造移除（git 历史可查）；回归保护由 tests/t1-t2 对 modlume 产物断言。
 export func write_tree(out: string, ctrl: string, sql_text: string, module_text: string): int {
   // lume 为底的运行布局：modules/<ctrl>.lume（路由+SSR）与 sql/<ctrl>.sql
   mkdir(out + "/modules");

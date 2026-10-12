@@ -1,10 +1,46 @@
-import "../lib/sql.lume" as sql;
-import "../lib/schema.lume" as schema;
-let f1 = { name: "id", type: "integer", primary: true, auto: true, system: true };
-let f2 = { name: "name", type: "varchar", length: 255, required: true, comment: "姓名", showInList: true, showInForm: true, searchable: true };
-let f3 = { name: "email", type: "varchar", comment: "邮箱", showInList: true, showInForm: true };
-let f4 = { name: "create_date", type: "timestamp", system: true };
-let fs = [f1, f2, f3, f4];
-print(sql.gen_sql("user", fs, 4, "crm_demo"));
-print("-----");
-print(schema.gen_schema("user", fs, 4));
+// tests/t1.lume — 模块生成器（modlume.gen_module）数据层回归断言
+// 锁：DDL 内嵌（SQLite 方言、单行、无尾逗号）、生成期预拼 INSERT/UPDATE SQL、
+// FIELDS 数据驱动标志位（system 字段不进表单）。main() 返回失败数即退出码。
+import "../lib/modlume.lume" as modlume;
+import "../lib/assert.lume" as a;
+
+let f1 = { name: "id", type: "integer", primary: 1, auto: 1, system: 1, showInList: 1, comment: "ID" };
+let f2 = { name: "name", type: "varchar", length: 255, required: 1, comment: "姓名", showInList: 1, showInForm: 1, searchable: 1 };
+let f3 = { name: "email", type: "varchar", comment: "邮箱", showInList: 1, showInForm: 1 };
+let f4 = { name: "create_date", type: "timestamp", system: 1, showInList: 1, comment: "创建时间" };
+let f5 = { name: "update_date", type: "timestamp", system: 1, showInList: 1, comment: "更新时间" };
+let fs = [f1, f2, f3, f4, f5];
+
+let mod = modlume.gen_module("user", fs, len(fs));
+
+let fails = 0;
+
+// DDL 内嵌：SQLite 方言、单行字符串字面量、无列定义尾随逗号
+// （内嵌字符串经 lume_str 转义，文件文本中的双引号是 \"，needle 须带转义）
+fails = fails + a.assert_contains(mod, "let DDL = \"CREATE TABLE", "t1: DDL embedded as single-line string literal");
+fails = fails + a.assert_contains(mod, "\\\"id\\\" INTEGER PRIMARY KEY AUTOINCREMENT", "t1: id uses INTEGER PRIMARY KEY AUTOINCREMENT");
+fails = fails + a.assert_not_contains(mod, ",)", "t1: no trailing comma in DDL columns");
+fails = fails + a.assert_not_contains(mod, "AUTO_INCREMENT", "t1: no MySQL AUTO_INCREMENT residue");
+fails = fails + a.assert_not_contains(mod, "COMMENT '", "t1: no MySQL COMMENT residue");
+
+// 生成期预拼 SQL：只含 form 字段、? 占位绑定；update_date 时间戳显式携带
+fails = fails + a.assert_contains(mod, "INSERT INTO \\\"user\\\" (\\\"name\\\", \\\"email\\\") VALUES (?, ?)", "t1: prebuilt INSERT covers form fields only with ? binding");
+fails = fails + a.assert_contains(mod, "UPDATE \\\"user\\\" SET \\\"name\\\" = ?, \\\"email\\\" = ?, \\\"update_date\\\" = CURRENT_TIMESTAMP WHERE id = ?", "t1: prebuilt UPDATE carries update_date timestamp");
+
+// FIELDS 数据驱动标志位：system 字段 form=0、searchable 进 search=1
+fails = fails + a.assert_contains(mod, "{ \"name\": \"id\", \"label\": \"ID\", \"form\": 0", "t1: system id excluded from form");
+fails = fails + a.assert_contains(mod, "{ \"name\": \"name\", \"label\": \"姓名\", \"form\": 1, \"search\": 1, \"required\": 1, \"list\": 1, \"type\": \"varchar\" }", "t1: name field flags form/search/required/list");
+fails = fails + a.assert_contains(mod, "{ \"name\": \"email\", \"label\": \"邮箱\", \"form\": 1, \"search\": 0", "t1: email in form but not searchable");
+
+// 产物不得残留 TS/Node 时代生成物
+fails = fails + a.assert_not_contains(mod, "useState", "t1: no React residue");
+fails = fails + a.assert_not_contains(mod, "import React", "t1: no React import residue");
+fails = fails + a.assert_not_contains(mod, "require(", "t1: no CommonJS residue");
+
+func main(): int {
+  if (fails == 0) { print("ALL PASS (t1: modlume data layer)"); }
+  else { print(str(fails) + " ASSERTION(S) FAILED"); }
+  return fails;
+}
+
+main();
