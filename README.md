@@ -114,7 +114,7 @@ lume-core main.lume init product
 # Windows：把 lume-core 换成 lume-core.exe（或写进 .env 的 LUME_CORE_BIN）
 ```
 
-生成产物落在 `./gen/`（**以 lume 为底的可运行工程**，零 Node 依赖）：
+生成产物落在 `./gen/`（**以 lume 为底的可运行工程**：lume 宿主跑服务端 + React 前端）：
 
 ```
 gen/
@@ -124,7 +124,14 @@ gen/
 │   └── db.lume            # SQLite 存取辅助（dsn/init/分页/计数）
 ├── modules/{module}.lume  # 每模块：DDL + 数据驱动字段表 + 路由 + SSR 页面
 ├── sql/{module}.sql       # 建表 DDL 导出（与模块内嵌一致，供人工核查）
-├── www/app.css            # 静态样式（server docroot 服务）
+├── web/                   # React 前端（Vite + React + TS，pnpm 管理）
+│   ├── package.json / vite.config.ts / tsconfig.json / index.html
+│   └── src/
+│       ├── main.tsx / App.tsx    # 入口 + hash 路由 + 模块导航
+│       ├── api.ts                # JSON API 客户端
+│       ├── pages/{Ctrl}Page.tsx  # 每模块页面（列表/受控表单/分页/删除确认）
+│       └── ui.css                # 样式（与 SSR app.css 同源）
+├── www/app.css            # SSR 静态样式（server docroot 服务）
 └── data/app.db            # SQLite 库（运行后生成）
 ```
 
@@ -137,11 +144,17 @@ cd gen
 
 # lume 宿主二进制（从 lume 仓库 make 得 bin/lume；或写 lume-nsgm/.env 的 LUME_BIN 绝对路径）
 lume app.lume
+
+# React 前端（主 UI）：另开终端
+cd web
+pnpm install        # packageManager 已钉 pnpm@12.11.2，corepack 自动接管
+pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ```
 
 - 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`；`env NSGM_DB` 可换库文件，`postgres://`/`mysql://` DSN 需宿主编译对应后端）
-- 页面： http://localhost:8081/ → 各模块列表页（搜索/新增/编辑/删除均为 SSR 表单，无需 JS）
-- JSON API： `GET /api/{module}?page=0&pageSize=20&q=关键字`、`GET /api/{module}/:id`、`POST /api/{module}`（JSON body 新增）、`POST /api/{module}/update/:id`、`POST /api/{module}/delete/:id`
+- **React 前端（主 UI）**： `pnpm dev` 起在 :5173，每模块生成 `<Ctrl>Page.tsx`（搜索/分页/受控表单/删除 confirm/时间列 `fmtTime` 本地化），hash 路由导航；`pnpm build && pnpm preview` 即生产预览（同样带 /api 代理，免 CORS）
+- SSR 回退页面： http://localhost:8081/ → 各模块列表页（搜索/新增/编辑/删除均为 SSR 表单，无需 JS）
+- JSON API： `GET /api/{module}?page=0&pageSize=20&q=关键字`、`GET /api/{module}/:id`、`POST /api/{module}`（JSON body 新增）、`POST /api/{module}/update/:id`、`POST /api/{module}/delete/:id`（React 前端消费的正是这套 API）
 - 在 lume-nsgm 根目录可 `make serve`（读 `.env` 的 `LUME_BIN`）
 
 > 说明：SSR 表单按 lume 宿主"GET 走 master 快速路径"的并发模型设计为 GET 提交（与 lume 仓 examples/demo.lume 的 GET-only 状态路由一致）；程序化写操作走 POST + JSON body。沙箱/CI 无法起长驻服务实测浏览链路，API 行为已 curl 实测。

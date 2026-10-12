@@ -49,7 +49,9 @@ func build_update(ctrl: string, fs, fidx): string {
   return "UPDATE \"" + ctrl + "\" SET " + sets + " WHERE id = ?";
 }
 
-export func gen_module(ctrl: string, fs, n: int): string {
+// 字段 ctx 构建（mod.tpl 与 reactgen 共用）：
+// form=入表单 search=可搜索 required=必填 list=列表列
+export func build_fields(fs, n: int) {
   let fields = [];
   let i = 0;
   while (i < n) {
@@ -70,6 +72,11 @@ export func gen_module(ctrl: string, fs, n: int): string {
     });
     i = i + 1;
   }
+  return fields;
+}
+
+export func gen_module(ctrl: string, fs, n: int): string {
+  let fields = build_fields(fs, n);
   let fidx = m.form_idx(fs, n);
   let ddl = trim(sqlgen.gen_sql(ctrl, fs, n, ""));
   let ctx = {

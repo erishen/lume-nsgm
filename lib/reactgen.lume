@@ -1,0 +1,163 @@
+// reactgen.lume — React 前端生成器（产物 web/：Vite + React + TS SPA）
+// 与 modlume 的 JSON API 配套：每模块生成 src/pages/<Ctrl>Page.tsx，
+// 另生成 src/App.tsx（hash 路由 + NAV）。静态基座（package.json/vite.config/
+// tsconfig/index.html/main.tsx/api.ts）由 scaffold/web/ 复制。
+import "model.lume" as m;
+import "modlume.lume" as ml;
+import "tpl.lume" as tpl;
+
+// 首字母大写（模块名约定为 ASCII 小写）
+func cap(s: string): string {
+  if (len(s) == 0) { return s; }
+  return upper(substr(s, 0, 1)) + substr(s, 1);
+}
+
+// React 页面字段 ctx：在 modlume.build_fields 基础上补 input_type / is_ts
+// （lume map 标量读走 get()、不做下标写，这里重建新 map）
+func page_fields(fs, n: int) {
+  let base = ml.build_fields(fs, n);
+  let out = [];
+  let i = 0;
+  while (i < len(base)) {
+    let f = base[i];
+    let t = get(f, "type", "");
+    let input_type = "text";
+    if (t == "integer" || t == "decimal") { input_type = "number"; }
+    let is_ts = 0;
+    if (t == "timestamp" || t == "date") { is_ts = 1; }
+    push(out, {
+      "name": get(f, "name", ""), "label": get(f, "label", ""),
+      "form": get(f, "form", 0), "search": get(f, "search", 0),
+      "required": get(f, "required", 0), "list": get(f, "list", 0),
+      "type": t,
+      "input_type": input_type, "is_ts": is_ts
+    });
+    i = i + 1;
+  }
+  return out;
+}
+
+// 每模块 React 页面：web/src/pages/<Ctrl>Page.tsx
+export func gen_page_tsx(ctrl: string, fs, n: int): string {
+  let ctx = {
+    "Ctrl": cap(ctrl),
+    "ctrl": ctrl,
+    "fields": page_fields(fs, n)
+  };
+  let tpl_text = read_file("templates/react_page.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/react_page.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
+}
+
+// 应用壳：web/src/App.tsx（hash 路由 + 模块导航，NAV 由模块清单注入）
+export func gen_app_tsx(mods): string {
+  let imports = "";
+  let tabs = "";
+  let nav_links = "";
+  let home_items = "";
+  let i = 0;
+  while (i < len(mods)) {
+    let name = get(mods[i], "name", "");
+    if (name != "") {
+      let C = cap(name);
+      let label = get(mods[i], "label", name);
+      imports = imports + "import " + C + "Page from \"./pages/" + C + "Page\";\n";
+      tabs = tabs + "  { name: \"" + name + "\", label: \"" + label + "\", comp: " + C + "Page },\n";
+      nav_links = nav_links + "          <a key={\"" + name + "\"} className={active && active.name === \"" + name + "\" ? \"active\" : \"\"} href={\"#/\" + \"" + name + "\"}>{\"" + label + "\"}</a>\n";
+      home_items = home_items + "            <li key={\"" + name + "\"}><a href={\"#/\" + \"" + name + "\"}>\"" + label + "\"</a></li>\n";
+    }
+    i = i + 1;
+  }
+  let s = "// src/App.tsx — 应用壳（lume-nsgm 生成：hash 路由 + 模块导航，勿手改）\n";
+  s = s + "import { useEffect, useState } from \"react\";\n";
+  s = s + imports;
+  s = s + "\ntype Tab = { name: string; label: string; comp: () => JSX.Element };\n\n";
+  s = s + "const TABS: Tab[] = [\n" + tabs + "];\n\n";
+  s = s + "export default function App() {\n";
+  s = s + "  const [route, setRoute] = useState(window.location.hash || \"#/home\");\n";
+  s = s + "  useEffect(() => {\n";
+  s = s + "    const onHash = () => setRoute(window.location.hash || \"#/home\");\n";
+  s = s + "    window.addEventListener(\"hashchange\", onHash);\n";
+  s = s + "    return () => window.removeEventListener(\"hashchange\", onHash);\n";
+  s = s + "  }, []);\n";
+  s = s + "  const cur = route.replace(/^#\\/?/, \"\").split(\"?\")[0];\n";
+  s = s + "  const active = TABS.find((t) => t.name === cur);\n";
+  s = s + "  return (\n";
+  s = s + "    <div>\n";
+  s = s + "      <header className=\"nav\">\n";
+  s = s + "        <a className=\"brand\" href=\"#/home\">lume-nsgm</a>\n";
+  s = s + nav_links;
+  s = s + "      </header>\n";
+  s = s + "      <main className=\"container\">\n";
+  s = s + "        {active ? (\n";
+  s = s + "          <active.comp />\n";
+  s = s + "        ) : (\n";
+  s = s + "          <div>\n";
+  s = s + "            <h1>lume-nsgm 生成的项目</h1>\n";
+  s = s + "            <ul>\n";
+  s = s + home_items;
+  s = s + "            </ul>\n";
+  s = s + "          </div>\n";
+  s = s + "        )}\n";
+  s = s + "      </main>\n";
+  s = s + "    </div>\n";
+  s = s + "  );\n";
+  s = s + "}\n";
+  return s;
+}
+
+// 生成整个 web/：静态基座复制 + ui.css（复用 app.css 并追加 SPA 扩展）
+// + 每模块页面 + App.tsx
+export func gen_web(out: string, mods): int {
+  mkdir(out + "/web/src/pages");
+
+  // 静态基座（scaffold/web/ -> out/web/）
+  let statics = [
+    "package.json",
+    "vite.config.ts",
+    "tsconfig.json",
+    "index.html",
+    "src/main.tsx",
+    "src/api.ts"
+  ];
+  let i = 0;
+  while (i < len(statics)) {
+    let f = statics[i];
+    let content = read_file("scaffold/web/" + f);
+    if (content != null) {
+      write_file(out + "/web/" + f, content);
+    } else {
+      print("WARN: scaffold/web/" + f + " missing");
+    }
+    i = i + 1;
+  }
+
+  // ui.css：复用 SSR 的 app.css（同一套 class 命名）+ SPA 专属扩展
+  let css = read_file("scaffold/www/app.css");
+  if (css != null) {
+    let extra = "\n/* --- React SPA 扩展（与 SSR 共用同一套 class 命名） --- */\n";
+    extra = extra + "button.ghost { background: #fff; color: var(--brand); border: 1px solid var(--brand); }\n";
+    extra = extra + "button.ghost:hover { background: var(--brand-soft); }\n";
+    extra = extra + ".form-actions { display: flex; gap: 8px; }\n";
+    extra = extra + "form.stack h2 { margin: 0 0 4px; font-size: 16px; color: var(--fg); }\n";
+    write_file(out + "/web/src/ui.css", css + extra);
+  }
+
+  // 每模块页面
+  i = 0;
+  while (i < len(mods)) {
+    let mod = mods[i];
+    let name = get(mod, "name", "");
+    if (name != "") {
+      let fs = get(mod, "fields", null);
+      let n = len(fs);
+      let text = gen_page_tsx(name, fs, n);
+      write_file(out + "/web/src/pages/" + cap(name) + "Page.tsx", text);
+    }
+    i = i + 1;
+  }
+
+  // App.tsx
+  write_file(out + "/web/src/App.tsx", gen_app_tsx(mods));
+  return 0;
+}

@@ -32,11 +32,13 @@ check:
 	$(LUME) --check tests/t2.lume
 	$(LUME) --check tests/t3.lume
 	$(LUME) --check tests/t4.lume
+	$(LUME) --check tests/t5.lume
 
-# 运行型测试：t3 为模板引擎冒烟；t1/t2/t4 为断言型回归（sql_default、模块生成器
-# 数据层/路由层），各自 main() 返回失败计数即退出码，断言失败则 make test 非零退出。
+# 运行型测试：t3 为模板引擎冒烟；t1/t2/t4/t5 为断言型回归（sql_default、模块生成器
+# 数据层/路由层、React 前端生成器），各自 main() 返回失败计数即退出码，
+# 断言失败则 make test 非零退出。
 test:
-	@for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume; do \
+	@for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume tests/t5.lume; do \
 		echo "=== running $$f ==="; \
 		$(LUME) $$f >/dev/null || exit 1; \
 	done

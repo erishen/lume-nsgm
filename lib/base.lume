@@ -1,8 +1,9 @@
-// base.lume — 输出以 lume 为底的可运行工程（app.lume + lib + modules + www）
+// base.lume — 输出以 lume 为底的可运行工程（app.lume + lib + modules + www + web）
 // 与 lib/scaffold.lume 的 write_tree 配合：write_tree 写 modules/<ctrl>.lume
-// 与 sql/<ctrl>.sql，本文件负责复制静态基座、生成 lib/ui.lume（NAV 注入）
-// 与 app.lume 入口。
+// 与 sql/<ctrl>.sql，本文件负责复制静态基座、生成 lib/ui.lume（NAV 注入）、
+// app.lume 入口与 web/ React 前端（Vite + React + TS，经 lib/reactgen.lume）。
 import "model.lume" as m;
+import "reactgen.lume" as rg;
 
 // 需要从 scaffold/ 复制的静态文件（路径相对于生成根 out）
 let STATIC_FILES = [
@@ -120,7 +121,7 @@ export func gen_app_entry(out: string, mods): int {
   return 0;
 }
 
-// 串联：建目录 -> 复制静态基座 -> ui.lume -> app.lume
+// 串联：建目录 -> 复制静态基座 -> ui.lume -> app.lume -> web/ React 前端
 export func base_project(out: string, mods): int {
   mkdir(out);
   mkdir(out + "/lib");
@@ -132,5 +133,6 @@ export func base_project(out: string, mods): int {
   copy_base(out);
   gen_ui(out, mods);
   gen_app_entry(out, mods);
+  rg.gen_web(out, mods);
   return 0;
 }

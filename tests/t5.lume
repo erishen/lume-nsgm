@@ -1,0 +1,53 @@
+// tests/t5.lume — React 前端生成器（reactgen）回归断言
+// 锁：页面组件结构（受控表单/hooks/API 调用/时间格式化）、App.tsx 路由装配、
+// 无未渲染 mustache 残留。main() 返回失败数即退出码。
+import "../lib/reactgen.lume" as rg;
+import "../lib/assert.lume" as a;
+
+let fs = [
+  { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
+  { "name": "name", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "姓名" },
+  { "name": "email", "type": "varchar", "showInList": 1, "showInForm": 1, "comment": "邮箱" },
+  { "name": "amount", "type": "decimal", "showInList": 1, "showInForm": 1, "comment": "金额" },
+  { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
+];
+
+let page = rg.gen_page_tsx("user", fs, len(fs));
+let app = rg.gen_app_tsx([{ "name": "user", "label": "用户" }, { "name": "order", "label": "订单" }]);
+
+let fails = 0;
+
+// 页面组件结构：组件名、hooks、API 客户端调用
+fails = fails + a.assert_contains(page, "export default function UserPage", "t5: component named UserPage");
+fails = fails + a.assert_contains(page, "const [rows, setRows] = useState<Row[]>([])", "t5: rows state via useState");
+fails = fails + a.assert_contains(page, "useEffect(", "t5: data loading via useEffect");
+fails = fails + a.assert_contains(page, "apiList(CTRL", "t5: list via apiList(CTRL)");
+fails = fails + a.assert_contains(page, "apiAdd(CTRL, data)", "t5: create via apiAdd");
+fails = fails + a.assert_contains(page, "apiUpdate(CTRL, Number(editing.id), data)", "t5: update via apiUpdate");
+fails = fails + a.assert_contains(page, "apiDelete(CTRL, id)", "t5: delete via apiDelete");
+fails = fails + a.assert_contains(page, "window.confirm(\"确认删除该记录？此操作不可恢复。\")", "t5: delete confirm dialog");
+fails = fails + a.assert_contains(page, "fmtTime(row[f.name])", "t5: timestamp cells via fmtTime");
+
+// 数据驱动字段：number 输入映射 decimal、时间列标记 is_ts、searchable 暴露
+fails = fails + a.assert_contains(page, "{ name: \"amount\", label: \"金额\", form: 1, search: 0, required: 0, list: 1, input_type: \"number\", is_ts: 0 }", "t5: decimal field maps to number input");
+fails = fails + a.assert_contains(page, "{ name: \"create_date\", label: \"创建时间\", form: 0, search: 0, required: 0, list: 1, input_type: \"text\", is_ts: 1 }", "t5: system timestamp excluded from form, marked is_ts");
+fails = fails + a.assert_contains(page, "const HAS_SEARCH = FIELDS.some((f) => f.search === 1);", "t5: search box conditional on searchable fields");
+
+// 不得有未渲染 mustache / 模板残留
+fails = fails + a.assert_not_contains(page, "{{", "t5: no unrendered mustache in page");
+fails = fails + a.assert_not_contains(page, "useState<any>", "t5: no untyped any state");
+
+// App.tsx：路由装配 + NAV 注入
+fails = fails + a.assert_contains(app, "import UserPage from \"./pages/UserPage\"", "t5: App imports UserPage");
+fails = fails + a.assert_contains(app, "import OrderPage from \"./pages/OrderPage\"", "t5: App imports OrderPage");
+fails = fails + a.assert_contains(app, "{ name: \"user\", label: \"用户\", comp: UserPage }", "t5: TABS entry with label");
+fails = fails + a.assert_contains(app, "window.addEventListener(\"hashchange\", onHash)", "t5: hash routing wired");
+fails = fails + a.assert_contains(app, "<active.comp />", "t5: active tab rendered");
+
+func main(): int {
+  if (fails == 0) { print("ALL PASS (t5: reactgen)"); }
+  else { print(str(fails) + " ASSERTION(S) FAILED"); }
+  return fails;
+}
+
+main();

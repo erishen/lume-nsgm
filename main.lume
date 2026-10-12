@@ -3,7 +3,8 @@
 //   lume-core main.lume create <module> [db] [out]   — 命令行单模块生成
 //   lume-core main.lume init <module> [db] [out]     — 交互式字段录入后生成（stdin）
 //   lume-core main.lume example-config.json          — 读配置文件批量生成
-// 产物为以 lume 为底的可运行工程（app.lume + modules + lib + www），用 lume 宿主运行。
+// 产物为以 lume 为底的可运行工程（app.lume + modules + lib + www + web React 前端），
+// 用 lume 宿主运行服务端，web/ 用 pnpm dev 联调。
 import "lib/model.lume" as m;
 import "lib/sql.lume" as sql;
 import "lib/modlume.lume" as modlume;
@@ -35,7 +36,7 @@ func cmd_create(args): int {
     { "name": "create_date", "type": "timestamp", "required": 0, "primary": 0, "auto": 0, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "创建时间" }
   ];
   gen_one(ctrl, fs, len(fs), db, out);
-  base.base_project(out, [{ "name": ctrl }]);
+  base.base_project(out, [{ "name": ctrl, "fields": fs }]);
   print("runnable project scaffolded at " + out + " (see README.run.md)");
   return 0;
 }
@@ -71,7 +72,7 @@ func cmd_init(args): int {
     }
   }
   gen_one(ctrl, fs, len(fs), db, out);
-  base.base_project(out, [{ "name": ctrl }]);
+  base.base_project(out, [{ "name": ctrl, "fields": fs }]);
   print("init done: " + ctrl + " (" + str(len(fs)) + " fields)");
   return 0;
 }
