@@ -1,16 +1,19 @@
-/* app.css — lume-nsgm 生成项目样式（SSR 页面） */
+/* app.css — lume-nsgm 生成项目样式（SSR 与 React 共用同一套 class 命名） */
 :root {
   --fg: #1f2937; --muted: #6b7280; --line: #e5e7eb;
   --brand: #2563eb; --brand-soft: #eff6ff; --brand-dark: #1d4ed8;
-  --bg: #f8fafc; --danger: #dc2626;
+  --bg: #f8fafc; --danger: #dc2626; --danger-soft: #fef2f2;
+  --ok-bg: #ecfdf5; --ok-fg: #047857; --ok-line: #a7f3d0;
+  --err-bg: #fef2f2; --err-fg: #b91c1c; --err-line: #fecaca;
+  --radius: 8px;
 }
 * { box-sizing: border-box; }
-body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--fg); background: var(--bg); }
+body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--fg); background: var(--bg); font-size: 14px; }
 
-/* 导航 */
+/* ---------- 导航 ---------- */
 header.nav {
-  display: flex; gap: 8px; align-items: center; padding: 12px 24px;
-  background: #fff; border-bottom: 1px solid var(--line);
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 10; box-shadow: 0 1px 2px rgba(0,0,0,.04);
 }
 header.nav .brand { font-weight: 700; color: var(--brand); text-decoration: none; margin-right: 12px; }
@@ -20,33 +23,57 @@ header.nav a.active, header.nav a:hover { color: var(--brand); background: var(-
 main.container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
 h1 { font-size: 20px; margin: 8px 0 16px; }
 h1 .muted { font-size: 14px; font-weight: 400; }
+h2 { font-size: 16px; margin: 0 0 12px; }
 
-/* 工具栏与表单 */
-form.toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+/* ---------- 按钮 ---------- */
 input, button {
   font-size: 14px; padding: 7px 12px; border: 1px solid var(--line);
   border-radius: 6px; background: #fff; color: var(--fg); outline: none;
 }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
 button {
   background: var(--brand); color: #fff; border-color: var(--brand);
-  cursor: pointer; transition: background .12s;
+  cursor: pointer; transition: background .12s, border-color .12s, color .12s;
 }
-button:hover { background: var(--brand-dark); }
+button:hover { background: var(--brand-dark); border-color: var(--brand-dark); }
 button.link-like { background: none; border: none; color: var(--brand); padding: 0; }
+
+/* 描边按钮（次级动作：搜索/取消/返回） */
+button.ghost, a.btn.ghost {
+  background: #fff; color: var(--brand); border: 1px solid var(--brand);
+}
+button.ghost:hover, a.btn.ghost:hover { background: var(--brand-soft); }
+/* 主按钮也允许 <a> 形态（SSR 工具栏的新增） */
+a.btn.primary, button.primary {
+  background: var(--brand); color: #fff; border: 1px solid var(--brand);
+  text-decoration: none; display: inline-block; font-size: 14px;
+  padding: 7px 12px; border-radius: 6px; cursor: pointer; transition: background .12s;
+}
+a.btn.primary:hover, button.primary:hover { background: var(--brand-dark); }
 a.btn { text-decoration: none; font-size: 14px; color: var(--brand); }
 
+/* ---------- 工具栏 ---------- */
+form.toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+form.toolbar .push { margin-left: auto; }
+form.toolbar a.clear { color: var(--muted); font-size: 13px; text-decoration: none; }
+form.toolbar a.clear:hover { color: var(--danger); text-decoration: underline; }
+
+/* ---------- 表格 ---------- */
+.table-wrap { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow-x: auto; }
 table.grid {
-  width: 100%; border-collapse: collapse; background: #fff;
-  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  width: 100%; border-collapse: collapse; min-width: 480px;
 }
 table.grid th, table.grid td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
 table.grid th { background: #f1f5f9; font-weight: 600; white-space: nowrap; }
 table.grid tbody tr:nth-child(even) { background: #fbfcfe; }
 table.grid tbody tr:hover { background: var(--brand-soft); }
+table.grid tbody tr:last-child td { border-bottom: none; }
 table.grid td a { color: var(--brand); text-decoration: none; margin-right: 6px; }
 table.grid td a:hover { text-decoration: underline; }
 table.grid td a.del { color: var(--danger); }
+/* 操作列右对齐 */
+table.grid th.op, table.grid td.op { text-align: right; white-space: nowrap; }
 
 /* 可排序表头（app.js 增强） */
 th.sortable { cursor: pointer; user-select: none; }
@@ -54,20 +81,35 @@ th.sortable::after { content: "⇅"; opacity: .3; margin-left: 5px; font-size: 1
 th.sortable[data-sort="asc"]::after  { content: "↑"; opacity: 1; }
 th.sortable[data-sort="desc"]::after { content: "↓"; opacity: 1; }
 
+/* ---------- 空状态 ---------- */
+.empty { text-align: center; padding: 40px 16px; color: var(--muted); }
+.empty .ico { font-size: 34px; margin-bottom: 8px; }
+.empty p { margin: 0 0 14px; }
+.empty a.btn.primary { display: inline-block; }
+
+/* ---------- 表单 ---------- */
 form.stack {
   display: grid; gap: 14px; background: #fff; padding: 20px;
-  border: 1px solid var(--line); border-radius: 8px; max-width: 480px;
+  border: 1px solid var(--line); border-radius: var(--radius); max-width: 480px;
 }
 form.stack label { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
-form.stack input[required] + ::after { content: ""; }
+form.stack .req { color: var(--danger); }
+.form-actions { display: flex; gap: 8px; }
+.form-actions a.btn.ghost { align-self: center; margin-left: auto; }
 
-/* flash 提示 */
-.flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; animation: slide-in .18s ease-out; }
-.flash.ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
-.flash.err { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+/* ---------- flash 提示 ---------- */
+.flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 12px; animation: slide-in .18s ease-out; }
+.flash.ok { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-line); }
+.flash.err { background: var(--err-bg); color: var(--err-fg); border: 1px solid var(--err-line); }
 @keyframes slide-in { from { transform: translateY(-4px); opacity: 0; } to { transform: none; opacity: 1; } }
 
-.pager { margin-top: 12px; display: flex; gap: 10px; }
-.pager a { color: var(--brand); text-decoration: none; font-size: 14px; }
-.pager a:hover { text-decoration: underline; }
+/* ---------- 分页 ---------- */
+.pager { margin-top: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.pager .info { color: var(--muted); font-size: 13px; }
+.pager a, .pager span.pg {
+  color: var(--brand); text-decoration: none; font-size: 13px;
+  padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff;
+}
+.pager a:hover { border-color: var(--brand); background: var(--brand-soft); }
+.pager span.pg.disabled { color: #c3c9d4; cursor: default; }
 .muted { color: var(--muted); }

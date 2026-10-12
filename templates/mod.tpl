@@ -78,16 +78,19 @@ func list_body(qp) {
   let total = get(res, "total", 0);
   let items = get(res, "items", []);
   let q = str(get(qp, "q", ""));
+  let clear_link = "";
+  if (q != "") { clear_link = "<a class=\"clear\" href=\"/{{ctrl}}\">清除</a>"; }
 
   let body = "<h1>{{ctrl}} 列表 <span class=\"muted\">(" + str(total) + ")</span></h1>\n";
   body = body + "<form class=\"toolbar\" method=\"get\" action=\"/{{ctrl}}\">"
     + "<input name=\"q\" value=\"" + ui.esc(q) + "\" placeholder=\"搜索\">"
     + "<input type=\"hidden\" name=\"page\" value=\"0\">"
-    + "<button>搜索</button>"
-    + "<a class=\"btn\" href=\"/{{ctrl}}/new\">新增</a>"
+    + "<button class=\"ghost\">搜索</button>"
+    + clear_link
+    + "<a class=\"btn primary push\" href=\"/{{ctrl}}/new\">+ 新增</a>"
     + "</form>\n";
 
-  body = body + "<table class=\"grid\"><thead><tr>";
+  body = body + "<div class=\"table-wrap\"><table class=\"grid\"><thead><tr>";
   let ncols = 1;
   let i = 0;
   while (i < len(FIELDS)) {
@@ -95,11 +98,14 @@ func list_body(qp) {
     if (get(f, "list", 0) == 1) { body = body + "<th>" + ui.esc(get(f, "label", "")) + "</th>"; ncols = ncols + 1; }
     i = i + 1;
   }
-  body = body + "<th>操作</th></tr></thead><tbody>\n";
+  body = body + "<th class=\"op\">操作</th></tr></thead><tbody>\n";
 
   i = 0;
   if (len(items) == 0) {
-    body = body + "<tr><td colspan=\"" + str(ncols) + "\" class=\"muted\">暂无数据</td></tr>\n";
+    body = body + "<tr><td colspan=\"" + str(ncols) + "\"><div class=\"empty\">"
+      + "<div class=\"ico\">📭</div><p>暂无数据</p>"
+      + "<a class=\"btn primary\" href=\"/{{ctrl}}/new\">新增第一条</a>"
+      + "</div></td></tr>\n";
   }
   while (i < len(items)) {
     let r = items[i];
@@ -118,18 +124,26 @@ func list_body(qp) {
       j = j + 1;
     }
     let rid = str(get(r, "id", 0));
-    body = body + "<td><a href=\"/{{ctrl}}/edit/" + rid + "\">编辑</a> "
+    body = body + "<td class=\"op\"><a href=\"/{{ctrl}}/edit/" + rid + "\">编辑</a> "
       + "<a class=\"del\" href=\"/{{ctrl}}/del/" + rid + "\">删除</a></td></tr>\n";
     i = i + 1;
   }
-  body = body + "</tbody></table>\n";
+  body = body + "</tbody></table></div>\n";
 
+  // 分页：总条数 + 页码恒显，上/下页按钮在越界侧置灰
+  let pages = (total + pageSize - 1) / pageSize;
+  if (pages < 1) { pages = 1; }
   body = body + "<div class=\"pager\">";
+  body = body + "<span class=\"info\">共 " + str(total) + " 条 · 第 " + str(page + 1) + " / " + str(pages) + " 页</span>";
   if (page > 0) {
-    body = body + "<a href=\"/{{ctrl}}?page=" + str(page - 1) + "&q=" + ui.esc(q) + "\">上一页</a>";
+    body = body + "<a href=\"/{{ctrl}}?page=" + str(page - 1) + "&q=" + ui.esc(q) + "\">‹ 上一页</a>";
+  } else {
+    body = body + "<span class=\"pg disabled\">‹ 上一页</span>";
   }
   if ((page + 1) * pageSize < total) {
-    body = body + "<a href=\"/{{ctrl}}?page=" + str(page + 1) + "&q=" + ui.esc(q) + "\">下一页</a>";
+    body = body + "<a href=\"/{{ctrl}}?page=" + str(page + 1) + "&q=" + ui.esc(q) + "\">下一页 ›</a>";
+  } else {
+    body = body + "<span class=\"pg disabled\">下一页 ›</span>";
   }
   body = body + "</div>\n";
   return body;
@@ -151,14 +165,19 @@ func form_page(id: int, vals, msg: string): string {
     let f = FIELDS[i];
     if (get(f, "form", 0) == 1) {
       let req_attr = "";
-      if (get(f, "required", 0) == 1) { req_attr = " required"; }
-      body = body + "  <label>" + ui.esc(get(f, "label", "")) + "\n"
+      let req_star = "";
+      if (get(f, "required", 0) == 1) {
+        req_attr = " required";
+        req_star = "<span class=\"req\"> *</span>";
+      }
+      body = body + "  <label>" + ui.esc(get(f, "label", "")) + req_star + "\n"
         + "    <input name=\"" + get(f, "name", "") + "\" value=\""
         + ui.esc(str(get(vals, get(f, "name", ""), ""))) + "\"" + req_attr + ">\n  </label>\n";
     }
     i = i + 1;
   }
-  body = body + "  <button>保存</button>\n  <a href=\"/{{ctrl}}\">返回</a>\n</form>\n";
+  body = body + "  <div class=\"form-actions\"><button>保存</button>"
+    + "<a class=\"btn ghost\" href=\"/{{ctrl}}\">返回</a></div>\n</form>\n";
   return ui.page("{{ctrl}}", "{{ctrl}}", body);
 }
 

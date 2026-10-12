@@ -119,9 +119,23 @@ export default function {{Ctrl}}Page() {
         {HAS_SEARCH ? (
           <input name="q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索" />
         ) : null}
-        <button type="submit">搜索</button>
-        <button type="button" className="ghost" onClick={openNew}>
-          新增
+        {HAS_SEARCH ? <button type="submit" className="ghost">搜索</button> : null}
+        {q ? (
+          <a
+            className="clear"
+            href={"#/" + CTRL}
+            onClick={(e) => {
+              e.preventDefault();
+              setQ("");
+              setPage(0);
+              load(0, "");
+            }}
+          >
+            清除
+          </a>
+        ) : null}
+        <button type="button" className="primary push" onClick={openNew}>
+          + 新增
         </button>
       </form>
 
@@ -131,7 +145,7 @@ export default function {{Ctrl}}Page() {
           {FORM_FIELDS.map((f) => (
             <label key={f.name}>
               {f.label}
-              {f.required === 1 ? " *" : ""}
+              {f.required === 1 ? <span className="req"> *</span> : null}
               <input
                 name={f.name}
                 type={f.input_type}
@@ -150,55 +164,70 @@ export default function {{Ctrl}}Page() {
         </form>
       ) : null}
 
-      <table className="grid">
-        <thead>
-          <tr>
-            {LIST_FIELDS.map((f) => (
-              <th key={f.name}>{f.label}</th>
-            ))}
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
+      <div className="table-wrap">
+        <table className="grid">
+          <thead>
             <tr>
-              <td colSpan={LIST_FIELDS.length + 1} className="muted">
-                暂无数据
-              </td>
+              {LIST_FIELDS.map((f) => (
+                <th key={f.name}>{f.label}</th>
+              ))}
+              <th className="op">操作</th>
             </tr>
-          ) : (
-            rows.map((row) => (
-              <tr key={String(row.id)}>
-                {LIST_FIELDS.map((f) => (
-                  <td key={f.name}>
-                    {f.is_ts === 1 ? fmtTime(row[f.name]) : String(row[f.name] ?? "")}
-                  </td>
-                ))}
-                <td>
-                  <a href={"#/" + CTRL} onClick={(e) => openEdit(row, e)}>
-                    编辑
-                  </a>
-                  <a className="del" href={"#/" + CTRL} onClick={(e) => removeRow(Number(row.id), e)}>
-                    删除
-                  </a>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={LIST_FIELDS.length + 1}>
+                  <div className="empty">
+                    <div className="ico">📭</div>
+                    <p>暂无数据</p>
+                    <button type="button" className="primary" onClick={openNew}>
+                      新增第一条
+                    </button>
+                  </div>
                 </td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+            ) : (
+              rows.map((row) => (
+                <tr key={String(row.id)}>
+                  {LIST_FIELDS.map((f) => (
+                    <td key={f.name}>
+                      {f.is_ts === 1 ? fmtTime(row[f.name]) : String(row[f.name] ?? "")}
+                    </td>
+                  ))}
+                  <td className="op">
+                    <a href={"#/" + CTRL} onClick={(e) => openEdit(row, e)}>
+                      编辑
+                    </a>
+                    <a className="del" href={"#/" + CTRL} onClick={(e) => removeRow(Number(row.id), e)}>
+                      删除
+                    </a>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <div className="pager">
+        <span className="info">
+          共 {total} 条 · 第 {page + 1} / {Math.max(1, Math.ceil(total / PAGE_SIZE))} 页
+        </span>
         {page > 0 ? (
           <a href={"#/" + CTRL} onClick={(e) => gotoPage(page - 1, e)}>
-            上一页
+            ‹ 上一页
           </a>
-        ) : null}
+        ) : (
+          <span className="pg disabled">‹ 上一页</span>
+        )}
         {(page + 1) * PAGE_SIZE < total ? (
           <a href={"#/" + CTRL} onClick={(e) => gotoPage(page + 1, e)}>
-            下一页
+            下一页 ›
           </a>
-        ) : null}
+        ) : (
+          <span className="pg disabled">下一页 ›</span>
+        )}
       </div>
     </div>
   );
