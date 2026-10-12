@@ -23,6 +23,20 @@ AI 再对 lume 代码做增量修改（小语言、语法面小，AI 的上下�
 
 一句话：它不是「替你打字的脚手架」，而是 **AI 编码时代的幻觉降噪器**——AI 写代码跑在受限运行时 + 已验证模板里，比裸生成靠谱得多。
 
+### schema 校验（AI-friendly 报错层）
+
+`lib/validate.lume` 在生成前对 config 做**一次性全量校验**（不是改一个报一个），每条错误带精确路径与修复提示，AI 一轮即可修完：
+
+```
+$ lume-core main.lume bad.json
+schema validation failed (2 error(s)) in "bad.json":
+  1. modules[0].fields[0]: unknown type "bogus_type" (supported: varchar/text/integer/decimal/boolean/date/datetime/timestamp)
+  2. modules[0].fields[1]: "name" must match [a-z][a-z0-9_]* (got "2bad")
+fix the config and re-run. ...
+```
+
+校验项：JSON 合法性、`modules` 非空、模块/字段 `name` 必须匹配 `[a-z][a-z0-9_]*`（**该名直接拼进 SQL DDL 与路由，白名单同时封死注入面**——曾实测 `"evil\"; DROP TABLE x--"` 可穿过无校验的生成器）、类型白名单、模块/字段重名（路由冲突）、空 `fields`。校验失败退出码 1，生成被完全跳过（此前缺 name 的模块会被静默跳过并谎报成功）。回归测试见 `tests/t6.lume`（16 断言）。
+
 ## 目录
 
 ```

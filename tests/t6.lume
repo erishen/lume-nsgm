@@ -1,0 +1,87 @@
+// tests/t6.lume — validate_config() 回归测试
+//
+// 锁定 schema 校验器的 AI-friendly 报错行为：
+//   1) 合法 config 零错误（正例不能误伤）
+//   2) 缺 modules / 空 modules
+//   3) 模块缺 name、name 非法标识符（SQL/路由注入面）
+//   4) 字段缺 name/type、未知类型、非法字段名、字段名重复
+//   5) 模块名重复（路由冲突）
+//   6) 报错必须带路径前缀 modules[i]（AI 修复定位用）
+// main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
+
+import "../lib/validate.lume" as v;
+import "../lib/assert.lume" as a;
+
+func ok(cfg) {
+  return len(v.validate_config(cfg)) == 0;
+}
+
+func has(cfg, frag) {
+  let errs = v.validate_config(cfg);
+  let i = 0;
+  while (i < len(errs)) {
+    if (contains(errs[i], frag)) { return true; }
+    i = i + 1;
+  }
+  return false;
+}
+
+func main() {
+  let f = 0;
+  let good = {
+    "db": "demo", "out": "./gen",
+    "modules": [
+      { "name": "user", "fields": [
+        { "name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1 },
+        { "name": "name", "type": "varchar", "required": 1, "searchable": 1 }
+      ] }
+    ]
+  };
+  f = f + a.assert_true(ok(good), "t6: valid config must pass");
+  f = f + a.assert_true(ok({"modules": [{"name": "user_order", "fields": [{"name": "a1_b", "type": "text"}]}]}),
+    "t6: underscores/digits in identifiers must pass");
+
+  f = f + a.assert_true(ok(null) == false, "t6: null config must fail");
+  f = f + a.assert_true(ok({}) == false, "t6: missing modules must fail");
+  f = f + a.assert_true(ok({"modules": []}) == false, "t6: empty modules must fail");
+
+  f = f + a.assert_true(has({"modules": [{"fields": [{"name": "x", "type": "varchar"}]}]}, "missing required \"name\""),
+    "t6: module without name must be reported");
+  f = f + a.assert_true(has({"modules": [{"name": "Evil; DROP", "fields": [{"name": "x", "type": "varchar"}]}]}, "[a-z][a-z0-9_]*"),
+    "t6: non-identifier module name must be rejected (SQL injection surface)");
+
+  let dupmods = {"modules": [
+    {"name": "dup", "fields": [{"name": "x", "type": "varchar"}]},
+    {"name": "dup", "fields": [{"name": "y", "type": "varchar"}]}
+  ]};
+  f = f + a.assert_true(has(dupmods, "duplicate module name"), "t6: duplicate module names must be reported");
+
+  f = f + a.assert_true(has({"modules": [{"name": "u", "fields": []}]}, "\"fields\" is empty"),
+    "t6: empty fields must be reported");
+  f = f + a.assert_true(has({"modules": [{"name": "u", "fields": [{"name": "x", "type": "bogus"}]}]}, "unknown type \"bogus\""),
+    "t6: unknown field type must be reported");
+  f = f + a.assert_true(has({"modules": [{"name": "u", "fields": [{"type": "varchar"}]}]}, "missing required \"name\""),
+    "t6: field without name must be reported");
+  f = f + a.assert_true(has({"modules": [{"name": "u", "fields": [{"name": "x"}]}]}, "missing required \"type\""),
+    "t6: field without type must be reported");
+  f = f + a.assert_true(has({"modules": [{"name": "u", "fields": [{"name": "2x", "type": "varchar"}]}]}, "must match [a-z][a-z0-9_]*"),
+    "t6: non-identifier field name must be rejected");
+  f = f + a.assert_true(has({"modules": [{"name": "u", "fields": [
+    {"name": "dup", "type": "varchar"}, {"name": "dup", "type": "varchar"}]}]}, "duplicate field name"),
+    "t6: duplicate field names must be reported");
+
+  // 报错路径必须可定位（AI 修复依赖）
+  let errs = v.validate_config({"modules": [
+    {"name": "u", "fields": [{"name": "x", "type": "bogus"}]},
+    {"name": "v", "fields": [{"name": "y", "type": "bogus"}]}
+  ]});
+  f = f + a.assert_contains(errs[0], "modules[0].fields[0]", "t6: error path modules[0].fields[0]");
+  f = f + a.assert_contains(errs[1], "modules[1].fields[0]", "t6: error path modules[1].fields[0]");
+
+  if (f > 0) {
+    print(str(f) + " ASSERTION(S) FAILED");
+  }
+  return f;
+}
+
+main();

@@ -1,0 +1,106 @@
+// validate.lume — config schema 校验（AI-friendly 报错层）
+//
+// 设计目标：AI（或人）产出 config JSON 后，校验器一次性收集**全部**错误
+// （而不是改一个报一个），每条错误带精确路径 modules[i].fields[j] 与修复提示，
+// 让下一轮修改可以一次到位。
+//
+// 为什么按标识符白名单严查 name：module/field 名最终会拼进 SQL DDL
+//（CREATE TABLE "name"）与 URL 路由，宽松即注入面——曾实测
+// "evil\"; DROP TABLE x--" 可原样穿过生成器直达产物。
+
+let TYPES = ",varchar,text,integer,decimal,boolean,date,datetime,timestamp,";
+let LOWER = "abcdefghijklmnopqrstuvwxyz";
+let IDENT = "abcdefghijklmnopqrstuvwxyz0123456789_";
+
+// 标识符规则：^[a-z][a-z0-9_]*$
+export func valid_ident(s: string): int {
+  let n = len(s);
+  if (n == 0) { return 0; }
+  if (!contains(LOWER, substr(s, 0, 1))) { return 0; }
+  let i = 1;
+  while (i < n) {
+    if (!contains(IDENT, substr(s, i, 1))) { return 0; }
+    i = i + 1;
+  }
+  return 1;
+}
+
+// 返回错误字符串数组；空数组 = 校验通过
+export func validate_config(cfg) {
+  let errs = [];
+  if (cfg == null) {
+    push(errs, "config: top level must be a JSON object {\"db\",\"out\",\"modules\"}");
+    return errs;
+  }
+  let mods = get(cfg, "modules", null);
+  if (mods == null) {
+    push(errs, "config: missing required \"modules\" (array of {name, fields})");
+    mods = [];
+  } else {
+    if (len(mods) == 0) {
+      push(errs, "config: \"modules\" is empty — define at least one module");
+    }
+  }
+  let seen_mods = ",";
+  let i = 0;
+  while (i < len(mods)) {
+    let mod = get(mods, i, null);
+    if (mod != null) {
+      let at = "modules[" + str(i) + "]";
+      let name = str(get(mod, "name", ""));
+      if (name == "") {
+        push(errs, at + ": missing required \"name\"");
+      } else {
+        if (valid_ident(name) == 0) {
+          push(errs, at + ": \"name\" must match [a-z][a-z0-9_]* (got \"" + name + "\") — it becomes the SQL table name and URL prefix");
+        }
+        if (contains(seen_mods, "," + name + ",")) {
+          push(errs, at + ": duplicate module name \"" + name + "\" (routes would collide)");
+        } else {
+          seen_mods = seen_mods + name + ",";
+        }
+      }
+      let fs = get(mod, "fields", null);
+      if (fs == null) {
+        push(errs, at + ": missing required \"fields\" (non-empty array)");
+        fs = [];
+      } else {
+        if (len(fs) == 0) {
+          push(errs, at + ": \"fields\" is empty — define at least one non-system field");
+        }
+      }
+      let seen = ",";
+      let j = 0;
+      while (j < len(fs)) {
+        let f = get(fs, j, null);
+        if (f != null) {
+          let fat = at + ".fields[" + str(j) + "]";
+          let fn = str(get(f, "name", ""));
+          let ty = str(get(f, "type", ""));
+          if (fn == "") {
+            push(errs, fat + ": missing required \"name\"");
+          } else {
+            if (valid_ident(fn) == 0) {
+              push(errs, fat + ": \"name\" must match [a-z][a-z0-9_]* (got \"" + fn + "\")");
+            }
+            if (contains(seen, "," + fn + ",")) {
+              push(errs, fat + ": duplicate field name \"" + fn + "\"");
+            } else {
+              seen = seen + fn + ",";
+            }
+          }
+          if (ty == "") {
+            push(errs, fat + ": missing required \"type\"");
+          } else {
+            if (!contains(TYPES, "," + ty + ",")) {
+              push(errs, fat + ": unknown type \"" + ty + "\" (supported: varchar/text/integer/decimal/boolean/date/datetime/timestamp)");
+            }
+          }
+        }
+        j = j + 1;
+      }
+    }
+    i = i + 1;
+  }
+  return errs;
+}

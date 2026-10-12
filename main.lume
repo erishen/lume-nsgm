@@ -10,6 +10,7 @@ import "lib/sql.lume" as sql;
 import "lib/modlume.lume" as modlume;
 import "lib/scaffold.lume" as sc;
 import "lib/base.lume" as base;
+import "lib/validate.lume" as v;
 
 func gen_one(ctrl: string, fs, n: int, db: string, out: string): int {
   let sql_text = sql.gen_sql(ctrl, fs, n, db);
@@ -78,9 +79,31 @@ func cmd_init(args): int {
 }
 
 // 配置文件批量生成：json 数组 modules + db + out
+// 校验失败：一次性列出全部错误（路径精确到 modules[i].fields[j]），exit 1
 func cmd_config(path: string): int {
   let txt = read_file(path);
-  let cfg = json(txt);
+  if (txt == "") {
+    print("error: cannot read \"" + path + "\" (missing or empty file)");
+    return 1;
+  }
+  let r = try(() => json(txt));
+  let jerr = get(r, "err", "");
+  if (jerr != null) {
+    print("error: invalid JSON in \"" + path + "\": " + str(jerr));
+    return 1;
+  }
+  let cfg = get(r, "ok", null);
+  let errs = v.validate_config(cfg);
+  if (len(errs) > 0) {
+    print("schema validation failed (" + str(len(errs)) + " error(s)) in \"" + path + "\":");
+    let k = 0;
+    while (k < len(errs)) {
+      print("  " + str(k + 1) + ". " + get(errs, k, ""));
+      k = k + 1;
+    }
+    print("fix the config and re-run. types: varchar/text/integer/decimal/boolean/date/datetime/timestamp; name rule: [a-z][a-z0-9_]*");
+    return 1;
+  }
   let db = get(cfg, "db", "crm_demo");
   let out = get(cfg, "out", "./gen");
   let mods = get(cfg, "modules", []);
@@ -99,17 +122,24 @@ func cmd_config(path: string): int {
   return 0;
 }
 
-let args = argv();
-let cmd = get(args, 0, "");
-if (cmd == "create") {
-  cmd_create(args);
-} else if (cmd == "init") {
-  cmd_init(args);
-} else if (cmd != "") {
-  cmd_config(cmd);
-} else {
+// main() 返回值 = 进程退出码（lume 脚本约定，同 tests/t4）
+func main(): int {
+  let args = argv();
+  let cmd = get(args, 0, "");
+  if (cmd == "create") {
+    return cmd_create(args);
+  }
+  if (cmd == "init") {
+    return cmd_init(args);
+  }
+  if (cmd != "") {
+    return cmd_config(cmd);
+  }
   print("usage:");
   print("  lume-core main.lume create <module> [db] [out]");
   print("  lume-core main.lume init <module> [db] [out]");
   print("  lume-core main.lume <config.json>");
+  return 1;
 }
+
+main();

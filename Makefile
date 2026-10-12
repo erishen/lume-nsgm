@@ -73,7 +73,7 @@ check:
 # 数据层/路由层、React 前端生成器），各自 main() 返回失败计数即退出码，
 # 断言失败则 make test 非零退出。
 test:
-	@for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume tests/t5.lume; do \
+	@for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume tests/t5.lume tests/t6.lume; do \
 		echo "=== running $$f ==="; \
 		$(LUME) $$f >/dev/null || exit 1; \
 	done
