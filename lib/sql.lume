@@ -4,12 +4,20 @@ import "tpl.lume" as tpl;
 
 // 字段 -> 模板 ctx 条目：type_sql 等逻辑仍由 model 层计算
 func field_ctx(f, last: int) {
+  let sd = m.sql_default(f);
+  let nn = m.sql_not_null(f) != "";
+  // 单列默认子句：sql_default 已编码优先级（create_date/update_date 时间戳、
+  // 非必填 varchar -> ''），其余可空字段补显式 DEFAULT NULL。
+  // 用互斥逻辑避免原版那种 "DEFAULT NULL DEFAULT ''" 重复默认子句的非法 SQL。
+  let dc = sd;
+  if (dc == "" && !nn) { dc = " DEFAULT NULL"; }
   let fm = {
     "name": m.fname(f),
     "type_sql": m.sql_type(f),
-    "not_null": m.sql_not_null(f) != "",
+    "not_null": nn,
     "auto": m.fauto(f) == 1,
-    "comment": m.fcomment(f)
+    "comment": m.fcomment(f),
+    "default": dc
   };
   return fm;
 }
