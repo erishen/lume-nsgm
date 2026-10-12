@@ -151,13 +151,12 @@ cp .env.example .env        # 填 DB_HOST/DB_USER/DB_PASSWORD/DB_NAME
 # 2) 建库建表（把生成的 SQL 应用到 MySQL）
 mysql -u root -p < server/sql/*.sql
 
-# 3) 安装依赖并启动
-npm install
-npm run dev                 # Next.js 前端 http://localhost:3000
-node server/index.js        # GraphQL + REST 服务 http://localhost:4000
+# 3) 安装依赖并启动（pnpm；packageManager 已钉 pnpm@12.11.2，corepack 会自动接管）
+pnpm install
+pnpm dev                    # concurrently 同时起 Next.js(:3000) 与 GraphQL/REST(:4000)
 ```
 
-> 说明：沙箱/CI 环境无法 `npm install` 实测，基座的依赖清单与装配逻辑对照 nsgm 的活体工程复刻；如遇依赖版本问题优先核对 `gen/package.json` 与 nsgm 根目录 `package.json` 的差异。
+> 说明：沙箱/CI 环境无法 `pnpm install` 实测，基座的依赖清单与装配逻辑对照 nsgm 的活体工程复刻；如遇依赖版本问题优先核对 `gen/package.json` 与 nsgm 根目录 `package.json` 的差异。
 
 ## 字段定义（example-config.json）
 

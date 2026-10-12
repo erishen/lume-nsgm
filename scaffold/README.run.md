@@ -24,8 +24,8 @@ cp .env.example .env
 ## 3. 安装依赖并启动
 
 ```bash
-npm install          # 或 pnpm install
-npm run dev          # 同时启动 GraphQL(:4000) 与 Next(:3000)
+pnpm install         # 首次运行需有 pnpm（corepack enable 或 npm i -g pnpm）
+pnpm dev             # 同时启动 GraphQL(:4000) 与 Next(:3000)
 ```
 
 - GraphQL 端点： http://localhost:4000/graphql （自带 Yoga IDE，可直接试查询）
