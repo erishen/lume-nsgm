@@ -1,8 +1,27 @@
 # lume-nsgm
 
-用 **lume**（自研语言，lume-core 运行时）实现的 **nsgm** 生成器引擎复刻版：输入模块字段定义（JSON），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API），`lume-core` 单二进制一条命令运行。
+**AI-friendly 的确定性 CRUD 生成层**：输入模块字段定义（JSON schema），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API + React 前端），`lume-core` 单二进制一条命令运行。
 
 > 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**，产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume-core 应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建 + docroot 静态 + `:name` 动态路由，core ≥ 0.6.0），零 Node 依赖；生成器侧同样用 lume-core 解释执行。
+
+## 为什么 AI 时代还需要它
+
+让 AI 直接生成整个应用，问题在于**输出空间无限大**：每一行代码都是新的幻觉面，每次生成都要重新验证。lume-nsgm 把问题切成两半——
+
+```
+AI 只产出 schema（受控、小、可校验的 JSON）
+   ↓
+nsgm 确定性生成（注入防护 / 转义 / 分页边界 / UI 规范，修一次处处对，
+   质量由 tests/t1-t5 套件与端到端探针固化）
+   ↓
+AI 再对 lume 代码做增量修改（小语言、语法面小，AI 的上下文负担极小）
+```
+
+- **AI 做决策，模板做执行**：schema 本身就是给 AI 的接口。生成器保证的是「无论谁写 schema，产物质量一致」。
+- **验证一次，永久复用**：模板产出的 CRUD 行为（31 项底座探针 + 生成器套件 + UI 截图）已验证；AI 手写代码则每个项目都要重走一遍验证。
+- **对 lume 生态**：lume-nsgm 是 lume 的第一个真实业务级消费者——动态路由、SQLite 内建、`json()`、三元运算符等语言特性都是它逼出来的。它是 lume-core 从玩具走向可用运行时的试金石。
+
+一句话：它不是「替你打字的脚手架」，而是 **AI 编码时代的幻觉降噪器**——AI 写代码跑在受限运行时 + 已验证模板里，比裸生成靠谱得多。
 
 ## 目录
 
@@ -200,3 +219,5 @@ lume-nsgm 是 lume 语言的**第一个真实业务级应用**（生成器领域
 - P4a：字符串内建 `upper/lower/capitalize/trim/contains/split/join/substr`
 - M1 修复：`join()` 字符串元素 verbatim（无 JSON 引号）、空列表 join 返回 `""` 而非 `null`
 - M2：`read_stdin()` 内建（stdin 交互输入）；模板引擎踩坑：`split("}}")` 会切开 `{{else}}`/`{{/if}}` 需重组、`head` 是保留字、`fbool` 需同时兼容 bool true 与数字 1
+- 基座切换（core ≥ 0.6.0）：自包含 SQLite 内建（`sql_query`/`sql_write`）、`json()` 双向、docroot 静态服务、`:name` 动态路由
+- 语言特性（core 0.7.0）：**三元运算符**（惰性求值、贴邻消歧）——生成模板中 `q != "" ? ... : ...` 这类 UI 条件渲染的直接驱动力
