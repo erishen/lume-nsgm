@@ -11,10 +11,13 @@ func field_ctx(f, last: int) {
   // 用互斥逻辑避免原版那种 "DEFAULT NULL DEFAULT ''" 重复默认子句的非法 SQL。
   let dc = sd;
   if (dc == "" && !nn) { dc = " DEFAULT NULL"; }
+  // SQLite 主键行（INTEGER PRIMARY KEY AUTOINCREMENT）自带 NOT NULL 语义，
+  // 不再渲染冗余的 NOT NULL 子句。
+  let shown_nn = nn && m.fauto(f) != 1;
   let fm = {
     "name": m.fname(f),
     "type_sql": m.sql_type(f),
-    "not_null": nn,
+    "not_null": shown_nn,
     "auto": m.fauto(f) == 1,
     "comment": m.fcomment(f),
     "default": dc
@@ -32,5 +35,11 @@ export func gen_sql(ctrl: string, fs, n: int, db: string): string {
   let ctx = { "db": db, "ctrl": ctrl, "fields": fields };
   let tpl_text = read_file("templates/sql.tpl");
   if (tpl_text == null) { return "// ERROR: templates/sql.tpl missing"; }
-  return tpl.render(tpl_text, ctx);
+  let text = tpl.render(tpl_text, ctx);
+  // SQLite 不允许列定义尾随逗号（MySQL 版靠表级 PRIMARY KEY 行兜底）；
+  // 模板逐行渲染天然带尾逗号，这里统一去掉最后一处 ",\n)"。
+  text = replace(text, ",\n);", "\n);");
+  // DDL 会内嵌进模块文件的 lume 字符串字面量，压成单行
+  text = replace(text, "\n", " ");
+  return text;
 }

@@ -88,15 +88,14 @@ export func gql_type(t: string): string {
 
 export func sql_type(f): string {
   let t = ftype(f);
-  if (t == "varchar") { return "varchar(" + flen(f) + ")"; }
-  if (t == "text") { return "text"; }
-  if (t == "integer") { return "integer"; }
-  if (t == "decimal") { return "decimal(10,2)"; }
-  if (t == "boolean") { return "boolean"; }
-  if (t == "date") { return "date"; }
-  if (t == "datetime") { return "datetime"; }
-  if (t == "timestamp") { return "TIMESTAMP(3)"; }
-  return "varchar(255)";
+  // SQLite 方言（lume 为底的存储层；sql_query/sql_write 走 db_layer 的 SQLite 分支）
+  if (t == "varchar") { return "TEXT"; }
+  if (t == "text") { return "TEXT"; }
+  if (t == "integer") { return "INTEGER"; }
+  if (t == "decimal") { return "REAL"; }
+  if (t == "boolean") { return "INTEGER"; }   // 0/1
+  if (t == "date" || t == "datetime" || t == "timestamp") { return "TEXT"; }
+  return "TEXT";
 }
 
 // 字段是否必填（SQL NOT NULL 判断；主键强制 NOT NULL）
@@ -107,12 +106,13 @@ export func sql_not_null(f): string {
   return "";
 }
 
-// 默认值子句（对照 nsgm sql-generator 的默认值规则）
+// 默认值子句（SQLite 方言。SQLite 无 ON UPDATE，update_date 的时间戳
+// 语义由生成的 UPDATE 语句显式携带 update_date = CURRENT_TIMESTAMP 实现）
 export func sql_default(f): string {
   let t = ftype(f);
   let n = fname(f);
-  if (t == "timestamp" && n == "create_date") { return " DEFAULT CURRENT_TIMESTAMP(3)"; }
-  if (t == "timestamp" && n == "update_date") { return " DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)"; }
+  if (t == "timestamp" && n == "create_date") { return " DEFAULT CURRENT_TIMESTAMP"; }
+  if (t == "timestamp" && n == "update_date") { return " DEFAULT CURRENT_TIMESTAMP"; }
   if (t == "varchar" && n != "id" && frequired(f) == 0) { return " DEFAULT ''"; }
   return "";
 }

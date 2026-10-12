@@ -1,0 +1,85 @@
+// modlume.lume — lume 模块生成器（产物 modules/<ctrl>.lume，lume 为底的运行形态）
+// 对照 templates/mod.tpl：数据驱动 FIELDS + 生成期拼好列固定 SQL，运行期
+// handler 用 sql_query/sql_write（? 参数绑定）+ SSR 页面（ui 组件）。
+import "model.lume" as m;
+import "sql.lume" as sqlgen;
+import "tpl.lume" as tpl;
+
+// 嵌入 lume 字符串字面量时的转义（DDL/SQL 里的双引号标识符）
+func lume_str(s: string): string {
+  return replace(s, "\"", "\\\"");
+}
+
+// INSERT INTO "t" ("a", "b") VALUES (?, ?)（只含 form 字段）
+func build_insert(ctrl: string, fs, fidx): string {
+  let cols = "";
+  let marks = "";
+  let i = 0;
+  while (i < len(fidx)) {
+    let f = fs[fidx[i]];
+    if (cols != "") { cols = cols + ", "; marks = marks + ", "; }
+    cols = cols + "\"" + m.fname(f) + "\"";
+    marks = marks + "?";
+    i = i + 1;
+  }
+  return "INSERT INTO \"" + ctrl + "\" (" + cols + ") VALUES (" + marks + ")";
+}
+
+// UPDATE "t" SET "a" = ?, "b" = ?[, "update_date" = CURRENT_TIMESTAMP] WHERE id = ?
+// update_date 是 system 字段（非 form），更新时间戳在此显式携带（SQLite 无 ON UPDATE）
+func build_update(ctrl: string, fs, fidx): string {
+  let sets = "";
+  let has_ts = 0;
+  let i = 0;
+  while (i < len(fs)) {
+    if (m.fname(fs[i]) == "update_date") { has_ts = 1; }
+    i = i + 1;
+  }
+  i = 0;
+  while (i < len(fidx)) {
+    let f = fs[fidx[i]];
+    if (sets != "") { sets = sets + ", "; }
+    sets = sets + "\"" + m.fname(f) + "\" = ?";
+    i = i + 1;
+  }
+  if (has_ts == 1) {
+    if (sets != "") { sets = sets + ", "; }
+    sets = sets + "\"update_date\" = CURRENT_TIMESTAMP";
+  }
+  return "UPDATE \"" + ctrl + "\" SET " + sets + " WHERE id = ?";
+}
+
+export func gen_module(ctrl: string, fs, n: int): string {
+  let fields = [];
+  let i = 0;
+  while (i < n) {
+    let f = fs[i];
+    let nm = m.fname(f);
+    let label = m.fcomment(f);
+    if (label == "") { label = nm; }
+    let form = 0;
+    if (m.fshow_form(f) == 1 && m.fprimary(f) == 0 && m.fsystem(f) == 0) { form = 1; }
+    let search = 0;
+    if (m.fsearchable(f) == 1 && m.fprimary(f) == 0) { search = 1; }
+    push(fields, {
+      "name": nm, "label": label,
+      "form": form, "search": search,
+      "required": m.frequired(f),
+      "list": m.fshow_list(f),
+      "type": m.ftype(f)
+    });
+    i = i + 1;
+  }
+  let fidx = m.form_idx(fs, n);
+  let ddl = trim(sqlgen.gen_sql(ctrl, fs, n, ""));
+  let ctx = {
+    "ctrl": ctrl, "table": ctrl,
+    "fields": fields,
+    "ddl": lume_str(ddl),
+    "insert_sql": lume_str(build_insert(ctrl, fs, fidx)),
+    "update_sql": lume_str(build_update(ctrl, fs, fidx))
+  };
+  let tpl_text = read_file("templates/mod.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/mod.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
+}

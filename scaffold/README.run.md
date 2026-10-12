@@ -1,58 +1,57 @@
 # 运行 lume-nsgm 生成的项目
 
-`lume-nsgm` 通过 `make run`（读 `example-config.json`）生成一套**可独立运行**的
-Next.js + GraphQL(Yoga) + MySQL 全栈工程，落在 `./gen`。
+`lume-nsgm` 通过 `make run`（读 `example-config.json`）生成一套**以 lume 为底**
+的全栈工程，落在 `./gen`：SSR 页面 + REST API + SQLite 存储，
+运行时只需 lume 宿主二进制，**零 Node 依赖**。
 
-## 1. 准备数据库
+## 1. 准备 lume 宿主
 
-在 MySQL 里建库并执行生成的建表 SQL：
+生成代码使用 lume 宿主的服务端能力（`server`/`route`/`run` 与
+`sql_query`/`sql_write` 内建），**lume-core（纯解释器）跑不了它**。
+
+从 lume 仓库构建（或用已装好的 `lume`）：
 
 ```bash
-mysql -u root -p -e "CREATE DATABASE crm_demo CHARACTER SET utf8mb4;"
-mysql -u root -p crm_demo < gen/server/sql/user.sql
-mysql -u root -p crm_demo < gen/server/sql/order.sql
+git clone <lume 仓库> lume && cd lume
+make            # -> bin/lume
 ```
 
-## 2. 配置环境变量
+## 2. 启动
 
 ```bash
 cd gen
-cp .env.example .env
-# 编辑 .env，填入你的 MySQL 账号/密码/库名
+../lume/bin/lume app.lume       # 或 lume 在 PATH 上：lume app.lume
 ```
 
-## 3. 安装依赖并启动
+- 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`）
+- 页面： http://localhost:8081/ → 导航进入各模块列表页
+  （搜索、新增、编辑、删除均为 SSR 表单/链接，无需 JS）
+- JSON API： `GET /api/<module>?page=0&pageSize=20&q=关键字`、
+  `GET /api/<module>/:id`、`POST /api/<module>`（JSON body 新增）、
+  `POST /api/<module>/update/:id`、`POST /api/<module>/delete/:id`
 
-```bash
-pnpm install         # 首次运行需有 pnpm（corepack enable 或 npm i -g pnpm）
-pnpm dev             # 同时启动 GraphQL(:4000) 与 Next(:3000)
-```
+## 3. 配置（可选）
 
-- GraphQL 端点： http://localhost:4000/graphql （自带 Yoga IDE，可直接试查询）
-- 前端页面： http://localhost:3000 → 点 `/user`、`/order` 进入 CRUD 列表
+| 环境变量 | 默认 | 含义 |
+|---|---|---|
+| `NSGM_DB` | `data/app.db` | SQLite 文件路径；`postgres://` / `mysql://` DSN 需宿主编译对应后端 |
+| `PORT`（写死在 app.lume 的 server 块） | `8081` | 监听端口，直接改 `app.lume` |
 
 ## 4. 目录结构（生成后）
 
 ```
 gen/
-├── package.json / tsconfig.json / next.config.js / .env.example
-├── server/
-│   ├── index.js              # Express + mysql2 连接池 + Yoga GraphQL
-│   ├── graphql/index.js      # 聚合 apis + schema 构建可执行 schema
-│   ├── utils/{common,validation}.js
-│   ├── apis/<module>.js      # 生成的 resolver 映射
-│   ├── schema/<module>.js    # 生成的 SDL 片段（CommonJS）
-│   └── sql/<module>.sql      # 生成的建表 SQL
-├── client/
-│   ├── _app.tsx / utils/fetch.ts / redux/store.ts
-│   ├── components/<module>/index.tsx   # 生成的 Antd 列表页
-│   ├── redux/<module>/{actions,reducer}.ts
-│   ├── service/<module>.ts / styled/<module>.ts
-│   └── i18n/zh-CN/<module>.ts
-└── pages/
-    ├── _app.tsx / index.tsx
-    └── <module>.tsx          # 薄壳，转发到 client/components/<module>
+├── app.lume               # 入口：server 块 + 模块装配 + 建表 + run()
+├── lib/
+│   ├── ui.lume            # SSR 组件库（导航由模块清单注入）
+│   └── db.lume            # SQLite 存取辅助（dsn/init/分页/计数）
+├── modules/
+│   └── <module>.lume      # 每模块：DDL + 数据驱动字段表 + 路由 + SSR 页面
+├── sql/<module>.sql       # 建表 DDL 导出（与模块内嵌一致，供人工核查）
+├── www/app.css            # 静态样式（server docroot 服务）
+└── data/app.db            # SQLite 库（运行后生成）
 ```
 
-> 说明：为保持最小可运行，客户端壳**精简掉了** nsgm 原生的 SSO 登录、完整 i18n、
-> Apollo Client（改用自写 `fetch` 封装）。需要时可按需补回。
+> 说明：SSR 表单按 lume 宿主"GET 走 master 快速路径"的并发模型设计为
+> GET 提交（与 examples/demo.lume 的 GET-only 状态路由一致）；程序化写操作
+> 走 POST + JSON body（`json()` 解析，无需 URL 解码）。

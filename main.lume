@@ -3,28 +3,17 @@
 //   lume-core main.lume create <module> [db] [out]   — 命令行单模块生成
 //   lume-core main.lume init <module> [db] [out]     — 交互式字段录入后生成（stdin）
 //   lume-core main.lume example-config.json          — 读配置文件批量生成
+// 产物为以 lume 为底的可运行工程（app.lume + modules + lib + www），用 lume 宿主运行。
 import "lib/model.lume" as m;
 import "lib/sql.lume" as sql;
-import "lib/schema.lume" as schema;
-import "lib/service.lume" as service;
-import "lib/resolver.lume" as resolver;
-import "lib/page.lume" as page;
+import "lib/modlume.lume" as modlume;
 import "lib/scaffold.lume" as sc;
 import "lib/base.lume" as base;
 
 func gen_one(ctrl: string, fs, n: int, db: string, out: string): int {
   let sql_text = sql.gen_sql(ctrl, fs, n, db);
-  let schema_text = schema.gen_schema(ctrl, fs, n);
-  let service_text = service.gen_service(ctrl, fs, n);
-  let resolver_text = resolver.gen_resolver(ctrl, fs, n);
-  let page_text = page.gen_page(ctrl, fs, n);
-  let actions_text = sc.gen_actions(ctrl);
-  let reducer_text = sc.gen_reducer(ctrl);
-  let styled_text = sc.gen_styled(ctrl);
-  let i18n_text = sc.gen_i18n(ctrl, fs, n);
-
-  sc.write_tree(out, ctrl, sql_text, schema_text, resolver_text,
-    service_text, page_text, actions_text, reducer_text, styled_text, i18n_text);
+  let module_text = modlume.gen_module(ctrl, fs, n);
+  sc.write_tree(out, ctrl, sql_text, module_text);
   print("generated: " + ctrl + " -> " + out);
   return 0;
 }

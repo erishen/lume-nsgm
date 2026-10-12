@@ -1,8 +1,8 @@
 # lume-nsgm
 
-用 **lume**（自研语言，lume-core 运行时）实现的 **nsgm** 生成器引擎复刻版：输入模块字段定义（JSON），输出一套 TS 全栈 CRUD 工程骨架（SQL / GraphQL schema / resolver / service / page / redux / styled / i18n）。
+用 **lume**（自研语言，lume-core 运行时）实现的 **nsgm** 生成器引擎复刻版：输入模块字段定义（JSON），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API），用 lume 宿主一条命令运行。
 
-> 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**；生成产物仍是 Next.js/Express + GraphQL + Antd 的 TS 全栈项目（即 nsgm 的输出风格），不替代任何运行时。
+> 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**，产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume 宿主应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建），零 Node 依赖；生成器侧仍用 lume-core 解释执行。
 
 ## 目录
 
@@ -114,49 +114,37 @@ lume-core main.lume init product
 # Windows：把 lume-core 换成 lume-core.exe（或写进 .env 的 LUME_CORE_BIN）
 ```
 
-生成产物落在 `./gen/`（自 v0.4 起为**可直接运行的 Next.js 工程布局**，并自动附带工程基座）：
+生成产物落在 `./gen/`（**以 lume 为底的可运行工程**，零 Node 依赖）：
 
 ```
 gen/
-├── package.json / tsconfig.json / next.config.js / .env.example
-├── server/
-│   ├── index.js                 # Express + mysql2 连接池 + GraphQL(Yoga) 挂载
-│   ├── graphql/index.js         # 聚合各模块 schema/resolver 装配可执行 schema
-│   ├── schema/{module}.js       # GraphQL schema 片段（query/mutation/type）
-│   ├── apis/{module}.js         # resolver（分页/Get/Search/Add/Update/Delete）
-│   ├── sql/{module}.sql         # 建库建表 SQL
-│   └── utils/                   # common.js(executeQuery) / validation.js
-├── client/
-│   ├── components/{module}/index.tsx   # Antd 列表页（搜索 + Modal 表单）
-│   ├── service/{module}.ts      # GraphQL 客户端 service
-│   ├── redux/store.ts + reducers.ts + {module}/
-│   ├── styled/{module}.ts
-│   ├── i18n/zh-CN/{module}.ts
-│   └── utils/fetch.ts           # getLocalGraphql 封装
-└── pages/
-    ├── _app.tsx / index.tsx     # 应用壳 + 模块导航
-    └── {module}.tsx             # 薄壳转发到 client/components/{module}
+├── app.lume               # 入口：server 块 + 模块装配（import 即注册路由）+ 建表 + run()
+├── lib/
+│   ├── ui.lume            # SSR 组件库（导航由模块清单注入）
+│   └── db.lume            # SQLite 存取辅助（dsn/init/分页/计数）
+├── modules/{module}.lume  # 每模块：DDL + 数据驱动字段表 + 路由 + SSR 页面
+├── sql/{module}.sql       # 建表 DDL 导出（与模块内嵌一致，供人工核查）
+├── www/app.css            # 静态样式（server docroot 服务）
+└── data/app.db            # SQLite 库（运行后生成）
 ```
 
 ## 运行生成的项目
 
-`make run`（或 `make base`）现在输出的不再只是模块碎片，而是一个**自带工程壳的可运行项目**：
+`make run`（或 `make base`）输出的即**以 lume 为底的可运行项目**，运行时只需 lume 宿主二进制（带 `server`/`route`/`run` 与 `sql_query`/`sql_write` 内建；注意 lume-core 纯解释器跑不了它）：
 
 ```bash
 cd gen
 
-# 1) 配置数据库连接
-cp .env.example .env        # 填 DB_HOST/DB_USER/DB_PASSWORD/DB_NAME
-
-# 2) 建库建表（把生成的 SQL 应用到 MySQL）
-mysql -u root -p < server/sql/*.sql
-
-# 3) 安装依赖并启动（pnpm；packageManager 已钉 pnpm@12.11.2，corepack 会自动接管）
-pnpm install
-pnpm dev                    # concurrently 同时起 Next.js(:3000) 与 GraphQL/REST(:4000)
+# lume 宿主二进制（从 lume 仓库 make 得 bin/lume；或写 lume-nsgm/.env 的 LUME_BIN 绝对路径）
+lume app.lume
 ```
 
-> 说明：沙箱/CI 环境无法 `pnpm install` 实测，基座的依赖清单与装配逻辑对照 nsgm 的活体工程复刻；如遇依赖版本问题优先核对 `gen/package.json` 与 nsgm 根目录 `package.json` 的差异。
+- 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`；`env NSGM_DB` 可换库文件，`postgres://`/`mysql://` DSN 需宿主编译对应后端）
+- 页面： http://localhost:8081/ → 各模块列表页（搜索/新增/编辑/删除均为 SSR 表单，无需 JS）
+- JSON API： `GET /api/{module}?page=0&pageSize=20&q=关键字`、`GET /api/{module}/:id`、`POST /api/{module}`（JSON body 新增）、`POST /api/{module}/update/:id`、`POST /api/{module}/delete/:id`
+- 在 lume-nsgm 根目录可 `make serve`（读 `.env` 的 `LUME_BIN`）
+
+> 说明：SSR 表单按 lume 宿主"GET 走 master 快速路径"的并发模型设计为 GET 提交（与 lume 仓 examples/demo.lume 的 GET-only 状态路由一致）；程序化写操作走 POST + JSON body。沙箱/CI 无法起长驻服务实测浏览链路，API 行为已 curl 实测。
 
 ## 字段定义（example-config.json）
 

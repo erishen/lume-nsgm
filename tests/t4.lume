@@ -1,11 +1,13 @@
-// tests/t4.lume — sql_default() 回归测试
+// tests/t4.lume — sql_default() 回归测试（SQLite 方言）
 //
-// 锁定 model.sql_default() 经 sql.field_ctx 接进生成器后的行为：
-//   1) create_date (timestamp, system) -> DEFAULT CURRENT_TIMESTAMP(3)
-//   2) update_date (timestamp, system) -> DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE ...
-//   3) 非必填 varchar (非 id)          -> DEFAULT ''
+// 锁定 model.sql_default() / sql_type() 经 sql.field_ctx 接进生成器后的行为：
+//   1) create_date (timestamp, system) -> TEXT DEFAULT CURRENT_TIMESTAMP
+//   2) update_date (timestamp, system) -> 同上（SQLite 无 ON UPDATE，
+//      更新时间戳由生成的 UPDATE 语句显式携带）
+//   3) 非必填 varchar (非 id)          -> TEXT DEFAULT ''
 //   4) 互斥默认子句，禁止 DEFAULT NULL DEFAULT '' 这类双重默认非法 SQL
-//   5) 主键声明存在
+//   5) 主键行 INTEGER PRIMARY KEY AUTOINCREMENT，且无冗余 NOT NULL
+//   6) 无 MySQL 方言残留（COMMENT/ENGINE/AUTO_INCREMENT/反引号）
 // main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
 
 import "../lib/sql.lume" as sql;
@@ -23,12 +25,17 @@ func main() {
   let out = sql.gen_sql("user", fs, len(fs), "crm_demo");
 
   let f = 0;
-  f = f + a.assert_contains(out, "`create_date` TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3)", "create_date 自动时间戳默认");
-  f = f + a.assert_contains(out, "`update_date` TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)", "update_date 自动更新时间戳");
-  f = f + a.assert_contains(out, "`email` varchar(255) DEFAULT ''", "非必填 varchar 默认空串");
+  f = f + a.assert_contains(out, "\"create_date\" TEXT DEFAULT CURRENT_TIMESTAMP", "create_date 自动时间戳默认");
+  f = f + a.assert_contains(out, "\"update_date\" TEXT DEFAULT CURRENT_TIMESTAMP", "update_date 时间戳默认");
+  f = f + a.assert_contains(out, "\"email\" TEXT DEFAULT ''", "非必填 varchar 默认空串");
+  f = f + a.assert_contains(out, "\"id\" INTEGER PRIMARY KEY AUTOINCREMENT", "主键自增行");
   f = f + a.assert_not_contains(out, "DEFAULT NULL DEFAULT", "无双重 DEFAULT 子句");
   f = f + a.assert_not_contains(out, "DEFAULT '' DEFAULT", "无重复空串默认");
-  f = f + a.assert_contains(out, "PRIMARY KEY", "含主键声明");
+  f = f + a.assert_not_contains(out, "AUTOINCREMENT NOT NULL", "主键行无冗余 NOT NULL");
+  f = f + a.assert_not_contains(out, "COMMENT", "无 MySQL COMMENT 子句");
+  f = f + a.assert_not_contains(out, "ENGINE=", "无 MySQL ENGINE 子句");
+  f = f + a.assert_not_contains(out, "AUTO_INCREMENT", "无 MySQL AUTO_INCREMENT");
+  f = f + a.assert_not_contains(out, "`", "无反引号（SQLite 用双引号标识符）");
 
   if (f == 0) {
     print("ALL PASS (sql_default regression: " + str(len(fs)) + " fields checked)");

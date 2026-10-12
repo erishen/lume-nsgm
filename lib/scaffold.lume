@@ -1,64 +1,12 @@
-// scaffold.lume — 文件树写入 + redux/styled/i18n 生成（模板渲染版）
-// 对照 nsgm src/generators/file-generator.ts；M1 精简文件集
-import "model.lume" as m;
-import "tpl.lume" as tpl;
+// scaffold.lume — 文件树写入（lume 为底的运行布局）
+// 旧版 redux/styled/i18n 前端生成器已随全 lume 栈改造移除（git 历史可查）；
+// service/resolver/page/schema 生成器仍保留（tests/t1-t2 的字符串生成回归）。
+export func write_tree(out: string, ctrl: string, sql_text: string, module_text: string): int {
+  // lume 为底的运行布局：modules/<ctrl>.lume（路由+SSR）与 sql/<ctrl>.sql
+  mkdir(out + "/modules");
+  mkdir(out + "/sql");
 
-// ---- redux actions ----
-export func gen_actions(ctrl: string): string {
-  let C = m.cap(ctrl);
-  let tpl_text = read_file("templates/actions.tpl");
-  if (tpl_text == null) { return "// ERROR: templates/actions.tpl missing"; }
-  return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
-}
-
-// ---- redux reducer（含异步 thunk 简版）----
-export func gen_reducer(ctrl: string): string {
-  let C = m.cap(ctrl);
-  let tpl_text = read_file("templates/reducer.tpl");
-  if (tpl_text == null) { return "// ERROR: templates/reducer.tpl missing"; }
-  return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
-}
-
-// ---- styled-components ----
-export func gen_styled(ctrl: string): string {
-  let tpl_text = read_file("templates/styled.tpl");
-  if (tpl_text == null) { return "// ERROR: templates/styled.tpl missing"; }
-  return tpl.render(tpl_text, {});
-}
-
-// ---- i18n（zh-CN 简版）----
-export func gen_i18n(ctrl: string, fs, n: int): string {
-  let C = m.cap(ctrl);
-  let tpl_text = read_file("templates/i18n.tpl");
-  if (tpl_text == null) { return "// ERROR: templates/i18n.tpl missing"; }
-  return tpl.render(tpl_text, { "ctrl": ctrl, "C": C });
-}
-
-// ---- 文件树写入（运行布局：server + client，可直接被基座托管）----
-export func write_tree(out: string, ctrl: string, sql_text: string, schema_text: string,
-  resolver_text: string, service_text: string, page_text: string,
-  actions_text: string, reducer_text: string, styled_text: string, i18n_text: string): int {
-  // resolver 的 require('../../utils/common') 需落在 server/apis 下
-  mkdir(out + "/server/sql");
-  mkdir(out + "/server/schema");
-  mkdir(out + "/server/apis");
-  mkdir(out + "/client/service");
-  mkdir(out + "/client/components");
-  mkdir(out + "/client/components/" + ctrl);
-  mkdir(out + "/client/redux");
-  mkdir(out + "/client/redux/" + ctrl);
-  mkdir(out + "/client/styled");
-  mkdir(out + "/client/i18n/zh-CN");
-
-  // schema 是 CommonJS module.exports，写成 .js 以便运行时 require
-  write_file(out + "/server/sql/" + ctrl + ".sql", sql_text);
-  write_file(out + "/server/schema/" + ctrl + ".js", schema_text);
-  write_file(out + "/server/apis/" + ctrl + ".js", resolver_text);
-  write_file(out + "/client/service/" + ctrl + ".ts", service_text);
-  write_file(out + "/client/components/" + ctrl + "/index.tsx", page_text);
-  write_file(out + "/client/redux/" + ctrl + "/actions.ts", actions_text);
-  write_file(out + "/client/redux/" + ctrl + "/reducer.ts", reducer_text);
-  write_file(out + "/client/styled/" + ctrl + ".ts", styled_text);
-  write_file(out + "/client/i18n/zh-CN/" + ctrl + ".ts", i18n_text);
+  write_file(out + "/modules/" + ctrl + ".lume", module_text);
+  write_file(out + "/sql/" + ctrl + ".sql", sql_text);
   return 0;
 }

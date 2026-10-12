@@ -1,0 +1,24 @@
+/* app.css — lume-nsgm 生成项目样式（SSR 页面） */
+:root { --fg: #1f2937; --muted: #6b7280; --line: #e5e7eb; --brand: #2563eb; --bg: #f8fafc; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--fg); background: var(--bg); }
+header.nav { display: flex; gap: 16px; align-items: center; padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--line); }
+header.nav .brand { font-weight: 700; color: var(--brand); text-decoration: none; }
+header.nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; }
+header.nav a.active, header.nav a:hover { color: var(--brand); background: #eff6ff; }
+main.container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+h1 { font-size: 20px; }
+form.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+input, button { font-size: 14px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; }
+button { background: var(--brand); color: #fff; border-color: var(--brand); cursor: pointer; }
+button.link-like { background: none; border: none; color: var(--brand); padding: 0; }
+table.grid { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+table.grid th, table.grid td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+table.grid th { background: #f1f5f9; font-weight: 600; }
+form.stack { display: grid; gap: 12px; background: #fff; padding: 16px; border: 1px solid var(--line); border-radius: 8px; max-width: 480px; }
+form.stack label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; }
+.flash.ok { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.flash.err { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.pager { margin-top: 12px; display: flex; gap: 8px; }
+.muted { color: var(--muted); }

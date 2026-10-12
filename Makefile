@@ -2,15 +2,21 @@
 
 -include .env
 LUME := $(or $(LUME_CORE_BIN),lume-core)
+# lume 宿主（带 server/route/run 与 sql 内建）；运行生成项目用，.env 可配 LUME_BIN
+LUME_HOST := $(or $(LUME_BIN),lume)
 TARGET = main.lume
 
-.PHONY: run base dev init check test clean
+.PHONY: run base dev init check test serve clean
 
 run:
 	$(LUME) $(TARGET) example-config.json
 
-# run 的别名：cmd_config 现已自动生成可运行工程基座（scaffold/ + reducers + pages 路由）
+# run 的别名：产物为以 lume 为底的可运行工程（app.lume + modules + SQLite）
 base: run
+
+# 用 lume 宿主运行生成项目（需先 make run；宿主二进制路径写 .env 的 LUME_BIN）
+serve:
+	cd gen && $(LUME_HOST) app.lume
 
 dev:
 	$(LUME) $(TARGET) create user
