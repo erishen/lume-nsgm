@@ -7,7 +7,12 @@ LUME := $(or $(LUME_CORE_BIN),lume-core)
 LUME_RUN := $(or $(LUME_BIN),lume-core)
 TARGET = main.lume
 
-.PHONY: run base dev init check test serve web-install clean
+.PHONY: run base dev create init check test serve web-install clean
+
+# 源比产物新（或产物缺失）则判定过期：main.lume / 配置 / lib / scaffold / templates 任一文件
+# （*.md 是纯文档，排除）
+GEN_STAMP := $(wildcard gen/app.lume)
+STALE := $(if $(GEN_STAMP),$(shell find main.lume example-config.json lib scaffold templates -type f -newer $(GEN_STAMP) ! -name '*.md' 2>/dev/null | head -1),yes)
 
 run:
 	$(LUME) $(TARGET) example-config.json
@@ -15,6 +20,17 @@ run:
 
 # run 的别名：产物为以 lume 为底的可运行工程（app.lume + modules + SQLite）
 base: run
+
+# 开发模式：产物缺失或源有更新时先重新生成（含 web 依赖幂等安装），
+# 然后前台启动 lume-core 服务（Ctrl-C 退出）
+dev:
+ifeq ($(STALE),)
+	@echo "==> 产物已是最新，直接启动"
+else
+	@echo "==> 产物缺失或源有更新，先重新生成..."
+	@$(MAKE) --no-print-directory run
+endif
+	cd gen && $(LUME_RUN) app.lume
 
 # gen/web 依赖安装（run 生成后自动触发，也可单独调用）：
 # - 幂等：node_modules/.pnpm 比 package.json 新（或同刻）则跳过；
@@ -36,8 +52,9 @@ web-install:
 serve:
 	cd gen && $(LUME_RUN) app.lume
 
-dev:
-	$(LUME) $(TARGET) create user
+# 交互式新建模块（生成后需 make dev / make run 重新产出工程）
+create:
+	$(LUME) $(TARGET) create $(MODULE)
 
 # 交互式字段录入后生成：echo "name varchar required searchable" | make init MODULE=product
 init:
