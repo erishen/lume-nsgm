@@ -129,7 +129,8 @@ func list_body(qp) {
   body = body + "</tbody></table></div>\n";
 
   // 分页：总条数 + 页码恒显，上/下页按钮在越界侧置灰
-  let pages = (total + pageSize - 1) / pageSize;
+  // lume 的 / 是浮点除，整除 ceil 须用 % 余数判断
+  let pages = int(total / pageSize) + (total % pageSize > 0 ? 1 : 0);
   if (pages < 1) { pages = 1; }
   body = body + "<div class=\"pager\">";
   body = body + "<span class=\"info\">共 " + str(total) + " 条 · 第 " + str(page + 1) + " / " + str(pages) + " 页</span>";
