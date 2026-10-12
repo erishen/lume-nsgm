@@ -179,11 +179,25 @@ export default function {{Ctrl}}Page() {
               <tr>
                 <td colSpan={LIST_FIELDS.length + 1}>
                   <div className="empty">
-                    <div className="ico">📭</div>
-                    <p>暂无数据</p>
-                    <button type="button" className="primary" onClick={openNew}>
-                      新增第一条
-                    </button>
+                    <div className="ico">{q ? "🔍" : "📭"}</div>
+                    <p>{q ? "无匹配结果" : "暂无数据"}</p>
+                    {q ? (
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() => {
+                          setQ("");
+                          setPage(0);
+                          load(0, "");
+                        }}
+                      >
+                        清除搜索
+                      </button>
+                    ) : (
+                      <button type="button" className="primary" onClick={openNew}>
+                        新增第一条
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

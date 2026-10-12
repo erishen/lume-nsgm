@@ -100,10 +100,17 @@ func list_body(qp) {
 
   i = 0;
   if (len(items) == 0) {
-    body = body + "<tr><td colspan=\"" + str(ncols) + "\"><div class=\"empty\">"
-      + "<div class=\"ico\">📭</div><p>暂无数据</p>"
-      + "<a class=\"btn primary\" href=\"/{{ctrl}}/new\">新增第一条</a>"
-      + "</div></td></tr>\n";
+    if (q != "") {
+      body = body + "<tr><td colspan=\"" + str(ncols) + "\"><div class=\"empty\">"
+        + "<div class=\"ico\">🔍</div><p>无匹配结果</p>"
+        + "<a class=\"btn primary\" href=\"/{{ctrl}}\">清除搜索</a>"
+        + "</div></td></tr>\n";
+    } else {
+      body = body + "<tr><td colspan=\"" + str(ncols) + "\"><div class=\"empty\">"
+        + "<div class=\"ico\">📭</div><p>暂无数据</p>"
+        + "<a class=\"btn primary\" href=\"/{{ctrl}}/new\">新增第一条</a>"
+        + "</div></td></tr>\n";
+    }
   }
   while (i < len(items)) {
     let r = items[i];
