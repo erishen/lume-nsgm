@@ -7,7 +7,8 @@ import "../lib/assert.lume" as a;
 let fs = [
   { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "ID" },
   { "name": "name", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "姓名" },
-  { "name": "email", "type": "varchar", "showInList": 1, "showInForm": 1, "comment": "邮箱" }
+  { "name": "email", "type": "varchar", "showInList": 1, "showInForm": 1, "comment": "邮箱" },
+  { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
 ];
 
 let mod = modlume.gen_module("user", fs, len(fs));
@@ -34,6 +35,10 @@ fails = fails + a.assert_contains(mod, "ui.esc(", "t2: output escaped via ui.esc
 fails = fails + a.assert_contains(mod, "LIMIT ? OFFSET ?", "t2: pagination uses bound params");
 fails = fails + a.assert_contains(mod, "LIKE ?", "t2: search uses bound params");
 fails = fails + a.assert_not_contains(mod, "queryValues", "t2: no legacy TS-era service residue");
+
+// UI 增强钩子：删除链接带 .del（app.js confirm 拦截）、时间列暴露 data-ts
+fails = fails + a.assert_contains(mod, "class=\\\"del\\\"", "t2: delete link carries .del class for confirm");
+fails = fails + a.assert_contains(mod, "data-ts=", "t2: timestamp cells expose data-ts for JS formatting");
 
 func main(): int {
   if (fails == 0) { print("ALL PASS (t2: modlume routes & pages)"); }

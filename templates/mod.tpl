@@ -108,13 +108,18 @@ func list_body(qp) {
     while (j < len(FIELDS)) {
       let f = FIELDS[j];
       if (get(f, "list", 0) == 1) {
-        body = body + "<td>" + ui.esc(str(get(r, get(f, "name", ""), ""))) + "</td>";
+        let v = str(get(r, get(f, "name", ""), ""));
+        // 时间列暴露原始值（data-ts），由 app.js 转本地友好格式
+        let ts_attr = "";
+        let ft = get(f, "type", "");
+        if (ft == "timestamp" || ft == "date") { ts_attr = " data-ts=\"" + ui.esc(v) + "\""; }
+        body = body + "<td" + ts_attr + ">" + ui.esc(v) + "</td>";
       }
       j = j + 1;
     }
     let rid = str(get(r, "id", 0));
     body = body + "<td><a href=\"/{{ctrl}}/edit/" + rid + "\">编辑</a> "
-      + "<a href=\"/{{ctrl}}/del/" + rid + "\">删除</a></td></tr>\n";
+      + "<a class=\"del\" href=\"/{{ctrl}}/del/" + rid + "\">删除</a></td></tr>\n";
     i = i + 1;
   }
   body = body + "</tbody></table>\n";

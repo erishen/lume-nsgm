@@ -8,6 +8,7 @@ import "model.lume" as m;
 let STATIC_FILES = [
   "lib/db.lume",
   "www/app.css",
+  "www/app.js",
   "README.run.md"
 ];
 
@@ -66,7 +67,8 @@ export func gen_ui(out: string, mods): int {
     + "  return \"<!DOCTYPE html>\\n<html lang=\\\"zh-CN\\\">\\n<head>\\n<meta charset=\\\"utf-8\\\">\\n\"\n"
     + "    + \"<meta name=\\\"viewport\\\" content=\\\"width=device-width, initial-scale=1\\\">\\n\"\n"
     + "    + \"<title>\" + esc(title) + \"</title>\\n\"\n"
-    + "    + \"<link rel=\\\"stylesheet\\\" href=\\\"/app.css\\\">\\n</head>\\n<body>\\n\"\n"
+    + "    + \"<link rel=\\\"stylesheet\\\" href=\\\"/app.css\\\">\\n\"\n"
+    + "    + \"<script src=\\\"/app.js\\\" defer></script>\\n</head>\\n<body>\\n\"\n"
     + "    + nav(active)\n"
     + "    + \"<main class=\\\"container\\\">\\n\" + body + \"</main>\\n</body>\\n</html>\\n\";\n"
     + "}\n";
