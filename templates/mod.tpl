@@ -78,15 +78,13 @@ func list_body(qp) {
   let total = get(res, "total", 0);
   let items = get(res, "items", []);
   let q = str(get(qp, "q", ""));
-  let clear_link = "";
-  if (q != "") { clear_link = "<a class=\"clear\" href=\"/{{ctrl}}\">清除</a>"; }
 
   let body = "<h1>{{ctrl}} 列表 <span class=\"muted\">(" + str(total) + ")</span></h1>\n";
   body = body + "<form class=\"toolbar\" method=\"get\" action=\"/{{ctrl}}\">"
     + "<input name=\"q\" value=\"" + ui.esc(q) + "\" placeholder=\"搜索\">"
     + "<input type=\"hidden\" name=\"page\" value=\"0\">"
     + "<button class=\"ghost\">搜索</button>"
-    + clear_link
+    + (q != "" ? "<a class=\"clear\" href=\"/{{ctrl}}\">清除</a>" : "")
     + "<a class=\"btn primary push\" href=\"/{{ctrl}}/new\">+ 新增</a>"
     + "</form>\n";
 
@@ -164,15 +162,12 @@ func form_page(id: int, vals, msg: string): string {
   while (i < len(FIELDS)) {
     let f = FIELDS[i];
     if (get(f, "form", 0) == 1) {
-      let req_attr = "";
-      let req_star = "";
-      if (get(f, "required", 0) == 1) {
-        req_attr = " required";
-        req_star = "<span class=\"req\"> *</span>";
-      }
-      body = body + "  <label>" + ui.esc(get(f, "label", "")) + req_star + "\n"
+      let req = get(f, "required", 0) == 1;
+      body = body + "  <label>" + ui.esc(get(f, "label", ""))
+        + (req ? "<span class=\"req\"> *</span>" : "") + "\n"
         + "    <input name=\"" + get(f, "name", "") + "\" value=\""
-        + ui.esc(str(get(vals, get(f, "name", ""), ""))) + "\"" + req_attr + ">\n  </label>\n";
+        + ui.esc(str(get(vals, get(f, "name", ""), ""))) + "\""
+        + (req ? " required" : "") + ">\n  </label>\n";
     }
     i = i + 1;
   }
