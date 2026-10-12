@@ -114,6 +114,7 @@ export func gen_web(out: string, mods): int {
   // 静态基座（scaffold/web/ -> out/web/）
   let statics = [
     "package.json",
+    "pnpm-workspace.yaml",
     "vite.config.ts",
     "tsconfig.json",
     "index.html",

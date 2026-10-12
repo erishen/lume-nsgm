@@ -145,9 +145,9 @@ cd gen
 # lume-core 二进制（从 lume-core 仓库 make 得 bin/lume-core）
 lume-core app.lume
 
-# React 前端（主 UI）：另开终端
+# React 前端（主 UI）：make run 已自动完成 gen/web 的 pnpm install，
+# 只有改了 web 依赖才需要手动重装；dev/build 直接可用
 cd web
-pnpm install        # packageManager 已钉 pnpm@12.11.2，corepack 自动接管
 pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ```
 

@@ -7,13 +7,30 @@ LUME := $(or $(LUME_CORE_BIN),lume-core)
 LUME_RUN := $(or $(LUME_BIN),lume-core)
 TARGET = main.lume
 
-.PHONY: run base dev init check test serve clean
+.PHONY: run base dev init check test serve web-install clean
 
 run:
 	$(LUME) $(TARGET) example-config.json
+	@$(MAKE) --no-print-directory web-install
 
 # run 的别名：产物为以 lume 为底的可运行工程（app.lume + modules + SQLite）
 base: run
+
+# gen/web 依赖安装（run 生成后自动触发，也可单独调用）：
+# - 幂等：node_modules/.pnpm 比 package.json 新（或同刻）则跳过；
+# - pnpm 缺失时降级为 corepack pnpm；都没有则提示手动，不报错——
+#   依赖安装失败不影响已生成的工程本体。
+web-install:
+	@if [ ! -d gen/web ]; then exit 0; fi; \
+	if [ gen/web/node_modules/.pnpm -nt gen/web/package.json ] 2>/dev/null; then \
+	  echo "==> gen/web 依赖已就绪，跳过 pnpm install"; exit 0; fi; \
+	if command -v pnpm >/dev/null 2>&1; then PM="pnpm"; \
+	elif command -v corepack >/dev/null 2>&1; then PM="corepack pnpm"; \
+	else echo "==> 未找到 pnpm/corepack，请手动安装: cd gen/web && pnpm install"; exit 0; fi; \
+	echo "==> gen/web 依赖安装 ($$PM)..."; \
+	(cd gen/web && $$PM install --silent) \
+	  && echo "==> gen/web 依赖就绪" \
+	  || echo "==> pnpm install 失败（不影响生成物），可稍后手动: cd gen/web && pnpm install"
 
 # 用 lume-core 运行生成项目（需先 make run；二进制路径可写 .env 的 LUME_BIN）
 serve:

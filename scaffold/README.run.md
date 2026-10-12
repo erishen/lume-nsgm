@@ -22,9 +22,13 @@ make            # -> bin/lume-core
 
 ### 2a. React 前端（主 UI，Vite + React + TS）
 
+`make run` 生成时会**自动执行 `gen/web` 的 pnpm install**（幂等：依赖已就绪则
+跳过；pnpm/corepack 缺失或安装失败只提示、不报错，可稍后 `make web-install`
+或手动 `cd gen/web && pnpm install`。`pnpm-workspace.yaml` 已内置
+`allowBuilds: esbuild`，pnpm ≥10 的构建脚本审批不会拦安装）。
+
 ```bash
 cd gen/web
-pnpm install                 # packageManager 已钉 pnpm@12.11.2，corepack 自动接管
 pnpm dev                     # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ```
 
