@@ -157,7 +157,7 @@ func list_body(qp) {
 
 // 表单页：新增（id=0）与编辑共用；vals 为预填 map，msg 为校验错误提示
 func form_page(id: int, vals, msg: string): string {
-  let body = "";
+  let body = "<div class=\"form-wrap\">\n";
   if (msg != "") { body = body + "<div class=\"flash err\">" + ui.esc(msg) + "</div>\n"; }
   if (id > 0) {
     body = body + "<h1>编辑 {{ctrl}}</h1>\n";
@@ -180,13 +180,13 @@ func form_page(id: int, vals, msg: string): string {
     i = i + 1;
   }
   body = body + "  <div class=\"form-actions\"><button>保存</button>"
-    + "<a class=\"btn ghost\" href=\"/{{ctrl}}\">返回</a></div>\n</form>\n";
+    + "<a class=\"btn ghost\" href=\"/{{ctrl}}\">返回</a></div>\n</form>\n</div>\n";
   return ui.page("{{ctrl}}", "{{ctrl}}", body);
 }
 
 func flash_page(msg: string, kind: string, back_path: string): string {
-  let body = "<div class=\"flash " + kind + "\">" + ui.esc(msg) + "</div>\n"
-    + "<p><a href=\"" + back_path + "\">返回列表</a></p>\n"
+  let body = "<div class=\"form-wrap\"><div class=\"flash " + kind + "\">" + ui.esc(msg) + "</div>\n"
+    + "<p><a href=\"" + back_path + "\">返回列表</a></p></div>\n"
     + "<script>setTimeout(function(){ location.href = '" + back_path + "'; }, 1200);</script>\n";
   return ui.page("{{ctrl}}", "{{ctrl}}", body);
 }

@@ -42,6 +42,8 @@ button.link-like { background: none; border: none; color: var(--brand); padding:
 /* 描边按钮（次级动作：搜索/取消/返回） */
 button.ghost, a.btn.ghost {
   background: #fff; color: var(--brand); border: 1px solid var(--brand);
+  text-decoration: none; display: inline-block;
+  font-size: 14px; padding: 7px 12px; border-radius: 6px; cursor: pointer;
 }
 button.ghost:hover, a.btn.ghost:hover { background: var(--brand-soft); }
 /* 主按钮也允许 <a> 形态（SSR 工具栏的新增） */
@@ -88,6 +90,10 @@ th.sortable[data-sort="desc"]::after { content: "↓"; opacity: 1; }
 .empty a.btn.primary { display: inline-block; }
 
 /* ---------- 表单 ---------- */
+/* 表单独立页：标题与卡片同宽整体居中，与列表页的中轴对齐 */
+.form-wrap { max-width: 480px; margin: 0 auto; }
+.form-wrap h1 { font-size: 18px; }
+.form-wrap form.stack { max-width: none; }
 form.stack {
   display: grid; gap: 14px; background: #fff; padding: 20px;
   border: 1px solid var(--line); border-radius: var(--radius); max-width: 480px;
