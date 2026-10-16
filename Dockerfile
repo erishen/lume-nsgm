@@ -23,8 +23,10 @@ FROM debian:bookworm-slim AS core-build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         make \
+        pkg-config \
         libsqlite3-dev \
         libcrypt-dev \
+        libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /core
@@ -54,11 +56,12 @@ RUN corepack enable \
     && corepack prepare pnpm@12.11.2 --activate \
     && pnpm config set registry https://registry.npmmirror.com
 
-# lume-core 动态链 libsqlite3 / libcrypt，node 基础镜像不带其运行时 .so，
-# 必须先装，否则 COPY 进来的二进制运行时会 “not found”(127)。
+# lume-core 动态链 libsqlite3 / libcrypt / libssl，node 基础镜像不带其运行时 .so，
+# 必须先装，否则 COPY 进来的二进制运行时会 “not found”(127) / libssl.so.3 缺失。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-0 \
         libcrypt1 \
+        libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -106,10 +109,11 @@ RUN mkdir -p /src/gen/www/spa \
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
-# 运行时仅需 SQLite 与 crypt 的共享库（构建期已静态/动态链入，运行期要 .so）
+# 运行时仅需 SQLite / crypt / openssl 的共享库（构建期已动态链入，运行期要 .so）
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-0 \
         libcrypt1 \
+        libssl3 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
