@@ -238,13 +238,39 @@ PY
   echo "$SHOP_HTML" | grep -q '机械键盘' || fail "店面应播种演示商品: $(echo "$SHOP_HTML" | head -5)"
   echo "$SHOP_HTML" | grep -q '¥399.00' || fail "店面价格应格式化为元（分->x.xx）"
   curl -s --noproxy '*' -o /dev/null "$PB/shop/buy/1" || fail "购买请求失败"
-  SONO="$(curl -s --noproxy '*' "$PB/api/order" | grep -oE 'SHOP-[0-9]+-1' | head -1)"
+  SONO="$(curl -s --noproxy '*' "$PB/api/order" | grep -oE '"order_no":"SHOP-[^"]*"' | head -1 | sed 's/"order_no":"//;s/"$//')"
   [ -n "$SONO" ] || fail "购买应产生 SHOP-* 订单"
   PAY_HTML="$(curl -s --noproxy '*' "$PB/shop/pay/$SONO")"
   echo "$PAY_HTML" | grep -q 'weixin://wxpay/bizpayurl' || fail "收银台应展示 code_url: $(echo "$PAY_HTML" | head -8)"
   curl -s --noproxy '*' -o /dev/null "$PB/shop/mock-pay/$SONO" || fail "模拟支付请求失败"
   curl -s --noproxy '*' "$PB/shop/result/$SONO" | grep -q '支付成功' || fail "模拟支付后结果页应为支付成功"
   curl -s --noproxy '*' "$PB/api/order?q=$SONO" | grep -q '"status":"paid"' || fail "店面支付后订单应落库 paid"
+  # ---- 幂等（ik）：同 ik 重复点击/刷新复用同一笔 pending 单；已支付则开新单（重买）----
+  # 用户明确诉求：避免重复下单。商品列表「购买」链接带 ik（幂等 Key）= id-now()，
+  # 下单 GET /shop/buy/:id?ik= 复用同一笔 pending 单；已支付后再点同 ik 开新单（SHOP-<ik>-r<ts>）。
+  echo "==> 幂等（ik）阶段：重复下单复用同一笔 pending 单，已支付开新单 ..."
+  IK="IDEM-$(date +%s%N)"
+  [ "$(code "$PB/shop/buy/1?ik=$IK")" = "200" ] || fail "幂等首购应 200"
+  IDEM_ONO="SHOP-$IK"
+  curl -s --noproxy '*' "$PB/api/order?q=$IDEM_ONO" | grep -q "\"order_no\":\"$IDEM_ONO\"" \
+    || fail "幂等：应已创建 $IDEM_ONO"
+  curl -s --noproxy '*' "$PB/api/order?q=$IDEM_ONO" | grep -q '"status":"pending"' \
+    || fail "幂等：首单应 pending"
+  # 刷新 / 重复点击（同一 ik）-> 复用同一笔，不产生新行
+  [ "$(code "$PB/shop/buy/1?ik=$IK")" = "200" ] || fail "幂等重复点击应 200"
+  [ "$(total_of "$PB/api/order?q=$IDEM_ONO")" = "1" ] \
+    || fail "幂等：同一 ik 重复下单不应产生新订单行（total 应为 1）"
+  # 模拟支付 -> paid
+  curl -s --noproxy '*' -o /dev/null "$PB/shop/mock-pay/$IDEM_ONO" || fail "幂等模拟支付请求失败"
+  curl -s --noproxy '*' "$PB/api/order?q=$IDEM_ONO" | grep -q '"status":"paid"' \
+    || fail "幂等：模拟支付后应为 paid"
+  # 已支付后再次同 ik -> 开新单（重买），订单号带 -r 后缀、状态 pending
+  curl -s --noproxy '*' -o /dev/null "$PB/shop/buy/1?ik=$IK" || fail "幂等已支付后重买请求失败"
+  REBUY="$(curl -s --noproxy '*' "$PB/api/order" | grep -oE "SHOP-$IK-r[0-9]+" | head -1)"
+  [ -n "$REBUY" ] || fail "幂等：已支付后同 ik 应开新单（SHOP-$IK-r<ts>）"
+  curl -s --noproxy '*' "$PB/api/order?q=$REBUY" | grep -q '"status":"pending"' \
+    || fail "幂等：重买新单应 pending"
+  echo "ok   幂等（ik）：首单 pending -> 同 ik 复用 -> 支付 -> 同 ik 重买开新单（SHOP-<ik>-r<ts>）"
   echo "ok   店面：商品列表 -> 购买下单 -> code_url 收银台 -> mock 支付 -> paid 落库"
 else
   echo "SKIP 支付阶段: 无 python3"
