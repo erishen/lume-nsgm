@@ -98,10 +98,11 @@ get "/shop/buy/:id", func(req) {
 get "/shop/pay/:ono", func(req) {
   let ono = str(get(req.params, "ono", ""));
   return shop_cashier(ono);
-};
+};'''
 
-// demo 专用：让 mock 网关代投递签名回调（真实环境由微信服务器打 notify）
-get "/shop/mock-pay/:ono", func(req) {
+# mock-pay 是微信 demo 专用（让 mock 网关代投签名回调）；PayPal 走真实 return/webhook，
+# 且 PAY_NOTIFY_URL/PAY_CFG 仅微信块声明。故在生成器作用域按 provider 门控其产出。
+partMock = r'''get "/shop/mock-pay/:ono", func(req) {
   let ono = str(get(req.params, "ono", ""));
   let orows = sql_query(db.dsn(), "SELECT * FROM \"__OM__\" WHERE \"__ONF__\" = ?", [ono]);
   if (len(orows) == 0) { return ui.page("支付", "shop", "<div class=\"flash err\">订单不存在</div>"); }
@@ -109,9 +110,9 @@ get "/shop/mock-pay/:ono", func(req) {
   let nb = stringify({ "notify_url": PAY_NOTIFY_URL, "order_no": ono, "amount_cents": cents });
   http_post(str(get(PAY_CFG, "gw", "")) + "/mock/notify", { "headers": { "Content-Type": "application/json" }, "body": nb, "allow_private": true, "timeout": 10 });
   return shop_result(ono);
-};
+};'''
 
-get "/shop/result/:ono", func(req) {
+partCtail = r'''get "/shop/result/:ono", func(req) {
   let ono = str(get(req.params, "ono", ""));
   return shop_result(ono);
 };'''
@@ -129,7 +130,19 @@ prov = (
 '  t = t + "}\\n"\n'
 )
 
-new_region = block(partA) + '  ;\n' + prov + block(partC) + '    ;\n'
+new_region = (block(partA) + '  ;\n'
+  + prov
+  + block(partC)
+  + '    ;\n'
+  + '  // demo：/shop/mock-pay 仅微信变体（PayPal 走真实 return/webhook；PAY_NOTIFY_URL/PAY_CFG 仅微信块声明）\n'
+  + '  if (provider != "paypal") {\n'
+  + '    t = t + ""\n'
+  + block(partMock)
+  + '      ;\n'
+  + '  }\n'
+  + '  t = t + ""\n'
+  + block(partCtail)
+  + '    ;\n')
 
 s2 = s[:i] + new_region + s[j:]
 if s2 == s:

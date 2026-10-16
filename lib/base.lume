@@ -370,7 +370,10 @@ export func gen_shop_block(shop, pay): string {
     + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
     + "  return shop_cashier(ono);\n"
     + "};\n"
-    + "// demo 专用：让 mock 网关代投递签名回调（真实环境由微信服务器打 notify）\n"
+    ;
+  // demo：/shop/mock-pay 仅微信变体（PayPal 走真实 return/webhook；PAY_NOTIFY_URL/PAY_CFG 仅微信块声明）
+  if (provider != "paypal") {
+    t = t + ""
     + "get \"/shop/mock-pay/:ono\", func(req) {\n"
     + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
     + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
@@ -380,6 +383,9 @@ export func gen_shop_block(shop, pay): string {
     + "  http_post(str(get(PAY_CFG, \"gw\", \"\")) + \"/mock/notify\", { \"headers\": { \"Content-Type\": \"application/json\" }, \"body\": nb, \"allow_private\": true, \"timeout\": 10 });\n"
     + "  return shop_result(ono);\n"
     + "};\n"
+      ;
+  }
+  t = t + ""
     + "get \"/shop/result/:ono\", func(req) {\n"
     + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
     + "  return shop_result(ono);\n"

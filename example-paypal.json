@@ -3,6 +3,16 @@
   "out": "./gen",
   "modules": [
     {
+      "name": "product",
+      "fields": [
+        { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
+        { "name": "name", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "商品名" },
+        { "name": "price_cents", "type": "integer", "required": 1, "showInList": 1, "showInForm": 1, "comment": "价格（分）" },
+        { "name": "detail", "type": "varchar", "required": 0, "showInList": 0, "showInForm": 1, "comment": "商品描述" },
+        { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "showInForm": 0, "comment": "创建时间" }
+      ]
+    },
+    {
       "name": "order",
       "fields": [
         { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
@@ -24,5 +34,11 @@
     "amount_field": "amount_cents",
     "status_field": "status",
     "webhook_path": "/api/pay/webhook"
+  },
+  "shop": {
+    "product_module": "product",
+    "order_module": "order",
+    "name_field": "name",
+    "price_field": "price_cents"
   }
 }
