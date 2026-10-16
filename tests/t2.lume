@@ -11,15 +11,16 @@ let fs = [
   { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
 ];
 
-let mod = modlume.gen_module("user", fs, len(fs), null);
+let mod = modlume.gen_module("user", fs, len(fs), null, "¥");
 // 订单模块（有店面+支付）：列表行注入「退款」链接，仅 paid 行渲染
 let ofs = [
   { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "ID" },
   { "name": "order_no", "type": "varchar", "required": 1, "showInList": 1, "comment": "订单号" },
+  { "name": "amount_cents", "type": "integer", "showInList": 1, "comment": "金额（分）" },
   { "name": "status", "type": "varchar", "showInList": 1, "comment": "状态" },
   { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
 ];
-let omod = modlume.gen_module("order", ofs, len(ofs), { "no_field": "order_no", "st_field": "status" });
+let omod = modlume.gen_module("order", ofs, len(ofs), { "no_field": "order_no", "st_field": "status" }, "$");
 
 let fails = 0;
 
@@ -52,6 +53,14 @@ fails = fails + a.assert_contains(mod, "data-ts=", "t2: timestamp cells expose d
 fails = fails + a.assert_not_contains(mod, "shop/refund", "t2: plain module has no refund link");
 fails = fails + a.assert_contains(omod, "/shop/refund/\" + ui.esc(str(get(r, \"order_no\", \"\")))", "t2: order module list injects refund link");
 fails = fails + a.assert_contains(omod, "str(get(r, \"status\", \"\")) == \"paid\"", "t2: refund link gated on paid status");
+
+// 展示格式化：FIELDS 数据行按字段名自动打 fmt 标（money=_cents 结尾 / st=status）；
+// 运行期分支代码在所有模块模板里都存在（文本层面），故断言必须落在 FIELDS 数据上
+fails = fails + a.assert_contains(omod, "\"name\": \"amount_cents\", \"label\": \"金额（分）\", \"form\": 0, \"search\": 0, \"required\": 0, \"list\": 1, \"type\": \"integer\", \"fmt\": \"money\" }", "t2: *_cents field tagged fmt=money");
+fails = fails + a.assert_contains(omod, "\"name\": \"status\", \"label\": \"状态\", \"form\": 0, \"search\": 0, \"required\": 0, \"list\": 1, \"type\": \"varchar\", \"fmt\": \"st\" }", "t2: status field tagged fmt=st");
+fails = fails + a.assert_contains(omod, "<td class=\\\"money\\\">$", "t2: money branch renders with passed currency symbol");
+fails = fails + a.assert_contains(omod, "\"st-ok\"", "t2: status branch carries st-ok badge class");
+fails = fails + a.assert_contains(mod, "\"name\": \"name\", \"label\": \"姓名\", \"form\": 1, \"search\": 1, \"required\": 1, \"list\": 1, \"type\": \"varchar\", \"fmt\": \"\" }", "t2: plain module fields keep fmt empty");
 
 func main(): int {
   if (fails == 0) { print("ALL PASS (t2: modlume routes & pages)"); }

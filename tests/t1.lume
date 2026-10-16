@@ -11,7 +11,7 @@ let f4 = { name: "create_date", type: "timestamp", system: 1, showInList: 1, com
 let f5 = { name: "update_date", type: "timestamp", system: 1, showInList: 1, comment: "更新时间" };
 let fs = [f1, f2, f3, f4, f5];
 
-let mod = modlume.gen_module("user", fs, len(fs), null);
+let mod = modlume.gen_module("user", fs, len(fs), null, "¥");
 
 let fails = 0;
 
@@ -29,7 +29,7 @@ fails = fails + a.assert_contains(mod, "UPDATE \\\"user\\\" SET \\\"name\\\" = ?
 
 // FIELDS 数据驱动标志位：system 字段 form=0、searchable 进 search=1
 fails = fails + a.assert_contains(mod, "{ \"name\": \"id\", \"label\": \"ID\", \"form\": 0", "t1: system id excluded from form");
-fails = fails + a.assert_contains(mod, "{ \"name\": \"name\", \"label\": \"姓名\", \"form\": 1, \"search\": 1, \"required\": 1, \"list\": 1, \"type\": \"varchar\" }", "t1: name field flags form/search/required/list");
+fails = fails + a.assert_contains(mod, "{ \"name\": \"name\", \"label\": \"姓名\", \"form\": 1, \"search\": 1, \"required\": 1, \"list\": 1, \"type\": \"varchar\", \"fmt\": \"\" }", "t1: name field flags form/search/required/list, fmt empty");
 fails = fails + a.assert_contains(mod, "{ \"name\": \"email\", \"label\": \"邮箱\", \"form\": 1, \"search\": 0", "t1: email in form but not searchable");
 
 // 产物不得残留 TS/Node 时代生成物

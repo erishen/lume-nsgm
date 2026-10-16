@@ -7,7 +7,7 @@ export let DDL = "{{ddl}}";
 export let TBL = "{{ctrl}}";
 // 数据驱动字段表：form=入表单 search=可搜索 required=必填 list=列表列
 let FIELDS = [
-{{#each fields as f}}  { "name": "{{f.name}}", "label": "{{f.label}}", "form": {{f.form}}, "search": {{f.search}}, "required": {{f.required}}, "list": {{f.list}}, "type": "{{f.type}}" },
+{{#each fields as f}}  { "name": "{{f.name}}", "label": "{{f.label}}", "form": {{f.form}}, "search": {{f.search}}, "required": {{f.required}}, "list": {{f.list}}, "type": "{{f.type}}", "fmt": "{{f.fmt}}" },
 {{/each}}
 ];
 
@@ -128,11 +128,27 @@ func list_body(qp) {
       let f = FIELDS[j];
       if (get(f, "list", 0) == 1) {
         let v = str(get(r, get(f, "name", ""), ""));
+        let ffmt = str(get(f, "fmt", ""));
+        if (ffmt == "money" && v != "" && v != "null") {
+          // *_cents 字段：分 -> 元（tabular-nums 对齐，货币符号随店面 provider）
+          let c = int(v);
+          let tail = str(c % 100);
+          if (c % 100 < 10) { tail = "0" + tail; }
+          body = body + "<td class=\"money\">{{cur_sym}}" + str(int(c / 100)) + "." + tail + "</td>";
+        } else if (ffmt == "st") {
+          // status 字段：paid=绿 pending=黄 refunded=灰（未知值=蓝）
+          let sc = "st-info";
+          if (v == "paid") { sc = "st-ok"; }
+          if (v == "pending") { sc = "st-warn"; }
+          if (v == "refunded") { sc = "st-mut"; }
+          body = body + "<td><span class=\"st " + sc + "\">" + ui.esc(v) + "</span></td>";
+        } else {
         // 时间列暴露原始值（data-ts），由 app.js 转本地友好格式
         let ts_attr = "";
         let ft = get(f, "type", "");
         if (ft == "timestamp" || ft == "date") { ts_attr = " data-ts=\"" + ui.esc(v) + "\""; }
         body = body + "<td" + ts_attr + ">" + ui.esc(v) + "</td>";
+        }
       }
       j = j + 1;
     }

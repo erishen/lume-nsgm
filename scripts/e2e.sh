@@ -281,6 +281,11 @@ PY
   OLIST="$(curl -s --noproxy '*' "$PB/order")"
   echo "$OLIST" | grep -q "/shop/refund/$SONO" \
     || fail "订单后台 paid 行应带退款链接: $(echo "$OLIST" | grep -o 'class=\"op\">.*' | head -3)"
+  # 展示格式化：*_cents 金额列分->元、status 列 paid 绿徽标（模板 fmt 自动识别）
+  echo "$OLIST" | grep -qF 'class="money">¥399.00' \
+    || fail "订单后台金额列应格式化为元: $(echo "$OLIST" | grep -o 'class="money">[^<]*' | head -2)"
+  echo "$OLIST" | grep -qF '<span class="st st-ok">paid</span>' \
+    || fail "订单后台 paid 行应带绿色状态徽标"
 
   # ---- 退款（微信）：确认页 -> mock 网关受理 -> refunded 落库 -> 重复退幂等 ----
   # 场景：/shop/refund/:ono 确认页（?confirm=1 执行）。仅 paid 可退；pending 单
@@ -304,6 +309,9 @@ PY
   # 重复退（幂等）：本地状态守卫，仍展示已退款
   curl -s --noproxy '*' "$PB/shop/refund/$SONO?confirm=1" | grep -q '已退款' \
     || fail "重复退应幂等展示已退款"
+  # 状态徽标联动：退款成功后 /order 该行应变灰徽标
+  curl -s --noproxy '*' "$PB/order" | grep -qF '<span class="st st-mut">refunded</span>' \
+    || fail "退款后订单后台应显示灰色已退款徽标"
   # 已退款行不应再显示退款链接（条件渲染只认 paid）
   curl -s --noproxy '*' "$PB/order" | grep -q "/shop/refund/$SONO" \
     && fail "refunded 行不应再带退款链接" || true
@@ -431,6 +439,12 @@ PY
   # 订单后台（/order）paid 行动作列应注入「退款」链接（用户诉求：UI 上能找到退款入口）
   curl -s --noproxy '*' "$PPB/order" | grep -q "/shop/refund/$ONO" \
     || fail "订单后台 paid 行应带退款链接"
+  # 展示格式化：美元计价 + paid 绿徽标（PayPal 变体 cur=$）
+  PPLIST="$(curl -s --noproxy '*' "$PPB/order")"
+  echo "$PPLIST" | grep -qF 'class="money">$399.00' \
+    || fail "PayPal 订单后台金额列应格式化为美元: $(echo "$PPLIST" | grep -o 'class="money">[^<]*' | head -2)"
+  echo "$PPLIST" | grep -qF '<span class="st st-ok">paid</span>' \
+    || fail "PayPal 订单后台 paid 行应带绿色状态徽标"
   # 正常路径：return 处理器应回填 paypal_order_id + capture_id（退款凭据）
   curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"capture_id":"MOCK-CAPTURE-' \
     || fail "return 处理器应回填 capture_id"
