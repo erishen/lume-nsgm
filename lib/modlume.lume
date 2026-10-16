@@ -51,6 +51,7 @@ func build_update(ctrl: string, fs, fidx): string {
 
 // 字段 ctx 构建（mod.tpl 与 reactgen 共用）：
 // form=入表单 search=可搜索 required=必填 list=列表列
+// type_sql/not_null/auto/default 供 mod.tpl 渲染 COLS（迁移用），reactgen 只读前几项
 export func build_fields(fs, n: int) {
   let fields = [];
   let i = 0;
@@ -68,7 +69,11 @@ export func build_fields(fs, n: int) {
       "form": form, "search": search,
       "required": m.frequired(f),
       "list": m.fshow_list(f),
-      "type": m.ftype(f)
+      "type": m.ftype(f),
+      "type_sql": m.sql_type(f),
+      "not_null": m.sql_not_null(f) != "",
+      "auto": m.fauto(f) == 1,
+      "default": m.sql_default(f)
     });
     i = i + 1;
   }

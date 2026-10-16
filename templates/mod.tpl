@@ -4,10 +4,16 @@ import "../lib/db.lume" as db;
 
 export let DDL = "{{ddl}}";
 
-let TBL = "{{ctrl}}";
+export let TBL = "{{ctrl}}";
 // 数据驱动字段表：form=入表单 search=可搜索 required=必填 list=列表列
 let FIELDS = [
 {{#each fields as f}}  { "name": "{{f.name}}", "label": "{{f.label}}", "form": {{f.form}}, "search": {{f.search}}, "required": {{f.required}}, "list": {{f.list}}, "type": "{{f.type}}" },
+{{/each}}
+];
+
+// 列元数据（迁移用）：name/type_sql/default 与 DDL 一致；auto 列不参与补齐
+export let COLS = [
+{{#each fields as f}}  { "name": "{{f.name}}", "type_sql": "{{f.type_sql}}", "not_null": {{f.not_null}}, "auto": {{f.auto}}, "default": "{{f.default}}" },
 {{/each}}
 ];
 
@@ -19,6 +25,8 @@ let UPDATE_SQL = "{{update_sql}}"; // ... WHERE id = ?（id 由 handler 追加�
 func where_for(qp) {
   let q = str(get(qp, "q", ""));
   if (q == "") { return { "where": "", "params": [] }; }
+  // 转义 LIKE 通配符，避免用户输入 %/_ 命中全部记录
+  let qe = replace(replace(q, "%", "\\%"), "_", "\\_");
   let conds = "";
   let params = [];
   let i = 0;
@@ -26,8 +34,8 @@ func where_for(qp) {
     let f = FIELDS[i];
     if (get(f, "search", 0) == 1) {
       if (conds != "") { conds = conds + " OR "; }
-      conds = conds + "\"" + get(f, "name", "") + "\" LIKE ?";
-      push(params, "%" + q + "%");
+      conds = conds + "\"" + get(f, "name", "") + "\" LIKE ? ESCAPE \"\\\"";
+      push(params, "%" + qe + "%");
     }
     i = i + 1;
   }

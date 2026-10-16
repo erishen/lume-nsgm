@@ -4,7 +4,7 @@
 //   lume-core main.lume init <module> [db] [out]     — 交互式字段录入后生成（stdin）
 //   lume-core main.lume example-config.json          — 读配置文件批量生成
 // 产物为以 lume 为底的可运行工程（app.lume + modules + lib + www + web React 前端），
-// 用 lume-core（0.6.0+）运行服务端，web/ 用 pnpm dev 联调。
+// 用 lume-core（0.7.0+）运行服务端，web/ 用 pnpm dev 联调。
 import "lib/model.lume" as m;
 import "lib/sql.lume" as sql;
 import "lib/modlume.lume" as modlume;
@@ -37,7 +37,7 @@ func cmd_create(args): int {
     { "name": "create_date", "type": "timestamp", "required": 0, "primary": 0, "auto": 0, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "创建时间" }
   ];
   gen_one(ctrl, fs, len(fs), db, out);
-  base.base_project(out, [{ "name": ctrl, "fields": fs }]);
+  base.base_project(out, [{ "name": ctrl, "fields": fs }], null);
   print("runnable project scaffolded at " + out + " (see README.run.md)");
   return 0;
 }
@@ -73,7 +73,7 @@ func cmd_init(args): int {
     }
   }
   gen_one(ctrl, fs, len(fs), db, out);
-  base.base_project(out, [{ "name": ctrl, "fields": fs }]);
+  base.base_project(out, [{ "name": ctrl, "fields": fs }], null);
   print("init done: " + ctrl + " (" + str(len(fs)) + " fields)");
   return 0;
 }
@@ -107,7 +107,8 @@ func cmd_config(path: string): int {
   let db = get(cfg, "db", "crm_demo");
   let out = get(cfg, "out", "./gen");
   let mods = get(cfg, "modules", []);
-  base.base_project(out, mods);
+  let pay = get(cfg, "pay", null);
+  base.base_project(out, mods, pay);
   let i = 0;
   while (i < len(mods)) {
     let mod = mods[i];

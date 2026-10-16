@@ -8,6 +8,7 @@ import "reactgen.lume" as rg;
 // 需要从 scaffold/ 复制的静态文件（路径相对于生成根 out）
 let STATIC_FILES = [
   "lib/db.lume",
+  "lib/pay.lume",
   "www/app.css",
   "www/app.js",
   "README.run.md"
@@ -77,9 +78,184 @@ export func gen_ui(out: string, mods): int {
   return 0;
 }
 
+// 生成支付接线块（config.pay 存在时注入 app.lume）：
+//   PAY_CFG（密钥走 env）+ post /api/pay/create + post <notify_path> 两条路由。
+// 表名/列名/notify_path 均已过 validate.lume 白名单（标识符/路径形状校验），
+// 可安全拼进生成的 SQL 与路由字符串；商户标识限令牌字符集（见 validate_pay）。
+func gen_pay_block(pay): string {
+  let provider = str(get(pay, "provider", "wechat"));
+  if (provider == "paypal") { return gen_paypal_block(pay); }
+  let gw = str(get(pay, "gateway", ""));
+  let appid = str(get(pay, "appid", ""));
+  let mchid = str(get(pay, "mchid", ""));
+  let serial = str(get(pay, "serial_no", ""));
+  let secret_env = str(get(pay, "secret_env", "PAY_SECRET"));
+  let om = str(get(pay, "order_module", ""));
+  let onf = str(get(pay, "order_no_field", "order_no"));
+  let amf = str(get(pay, "amount_field", "amount_cents"));
+  let stf = str(get(pay, "status_field", "status"));
+  let np = str(get(pay, "notify_path", "/api/pay/notify"));
+  if (np == "") { np = "/api/pay/notify"; }
+  let dflt_notify = "http://127.0.0.1:8081" + np;
+  // SQL 片段（双引号标识符在生成文件里是 \"，故此处用 \\\"）
+  let sel_amt = "SELECT \\\"" + amf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
+  let sel_st = "SELECT \\\"" + stf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
+  let upd_st = "UPDATE \\\"" + om + "\\\" SET \\\"" + stf + "\\\" = 'paid' WHERE \\\"" + onf + "\\\" = ?";
+  let b = "// ---- 支付接线（lume-nsgm 生成；密钥从环境变量 " + secret_env + " 注入，勿硬编码）----\n"
+    + "// 与真实微信支付 v3 的差距：签名为 HMAC-SHA256（真实为 SHA256-RSA，需签名\n"
+    + "// sidecar 或 core 补 RSA 内建）；回调验签头 core 未暴露（req 无 headers），\n"
+    + "// 故签名材料随 body 传递（沙箱约定）。详见 README「支付」节。\n"
+    + "let PAY_SECRET_RAW = env(\"" + secret_env + "\");\n"
+    + "let PAY_NOTIFY_RAW = env(\"PAY_NOTIFY_URL\");\n"
+    + "let PAY_GATEWAY_RAW = env(\"PAY_GATEWAY\");\n"
+    + "let PAY_CFG = {\n"
+    + "  \"gw\": (PAY_GATEWAY_RAW != null && PAY_GATEWAY_RAW != \"\" ? str(PAY_GATEWAY_RAW) : \"" + gw + "\"),\n"
+    + "  \"appid\": \"" + appid + "\",\n"
+    + "  \"mchid\": \"" + mchid + "\",\n"
+    + "  \"serial\": \"" + serial + "\",\n"
+    + "  \"secret\": (PAY_SECRET_RAW != null ? str(PAY_SECRET_RAW) : \"\")\n"
+    + "};\n"
+    + "let PAY_NOTIFY_URL = (PAY_NOTIFY_RAW != null && PAY_NOTIFY_RAW != \"\") ? str(PAY_NOTIFY_RAW) : \"" + dflt_notify + "\";\n\n"
+    + "post \"" + np + "\", func(req) {\n"
+    + "  if (get(req, \"body\", null) == null) { return pay.notify_fail(\"empty body\"); }\n"
+    + "  let data = json(req.body);\n"
+    + "  if (data == null) { return pay.notify_fail(\"invalid json\"); }\n"
+    + "  // 沙箱约定：签名材料随 body（真实 v3 走 Wechatpay-* 响应头，见 S7）\n"
+    + "  let ts = str(get(data, \"verify_ts\", \"\"));\n"
+    + "  let nonce = str(get(data, \"verify_nonce\", \"\"));\n"
+    + "  let sign = str(get(data, \"verify_sign\", \"\"));\n"
+    + "  let payload = str(get(data, \"payload\", \"\"));\n"
+    + "  if (!pay.verify_notify(str(get(PAY_CFG, \"secret\", \"\")), ts, nonce, payload, sign)) {\n"
+    + "    return pay.notify_fail(\"signature mismatch\");\n"
+    + "  }\n"
+    + "  let evt = json(payload);\n"
+    + "  if (evt == null) { return pay.notify_fail(\"invalid payload\"); }\n"
+    + "  let order_no = str(get(evt, \"out_trade_no\", \"\"));\n"
+    + "  if (order_no == \"\") { return pay.notify_fail(\"missing out_trade_no\"); }\n"
+    + "  // 幂等：仅 pending -> paid；重复通知（已流转）回 SUCCESS，防网关重试风暴\n"
+    + "  let cur = sql_query(db.dsn(), \"" + sel_st + "\", [order_no]);\n"
+    + "  if (len(cur) > 0 && str(get(cur[0], \"" + stf + "\", \"\")) == \"paid\") { return pay.notify_ok(); }\n"
+    + "  sql_write(db.dsn(), \"" + upd_st + "\", [order_no]);\n"
+    + "  return pay.notify_ok();\n"
+    + "};\n\n"
+    + "post \"/api/pay/create\", func(req) {\n"
+    + "  if (get(req, \"body\", null) == null) { return { \"status\": 400, \"body\": { \"err\": \"empty body\" } }; }\n"
+    + "  let data = json(req.body);\n"
+    + "  if (data == null) { return { \"status\": 400, \"body\": { \"err\": \"invalid json body\" } }; }\n"
+    + "  let order_no = str(get(data, \"order_no\", \"\"));\n"
+    + "  if (order_no == \"\") { return { \"status\": 400, \"body\": { \"err\": \"missing order_no\" } }; }\n"
+    + "  let rows = sql_query(db.dsn(), \"" + sel_amt + "\", [order_no]);\n"
+    + "  if (len(rows) == 0) { return { \"status\": 404, \"body\": { \"err\": \"order not found\" } }; }\n"
+    + "  let cents = int(get(rows[0], \"" + amf + "\", 0));\n"
+    + "  let r = pay.create_native(PAY_CFG, order_no, cents, \"订单 \" + order_no, PAY_NOTIFY_URL);\n"
+    + "  if (get(r, \"ok\", false) != true) {\n"
+    + "    return { \"status\": 502, \"body\": { \"err\": \"gateway error\", \"detail\": str(get(r, \"err\", \"\")) } };\n"
+    + "  }\n"
+    + "  return { \"status\": 200, \"body\": { \"ok\": true, \"code_url\": str(get(r, \"code_url\", \"\")) } };\n"
+    + "};\n";
+  return b;
+}
+
+// PayPal 支付接线块（provider: paypal）：OAuth2 建单 + 跳转 + 返回捕获。
+// 与微信同口径：client_id 来自配置（公开标识），client_secret 走 env（secret_env），
+// gw 可被 PAY_GATEWAY 覆盖，return/cancel 基址走 PAYPAL_RETURN_URL（默认 127.0.0.1:8081）。
+// 创建接口返回 JSON { ok, approve_url, paypal_order_id }（前端据此 window.location 跳转）；
+// PayPal 跳回 return?token=<pp_order_id>&order_no=<本地单号> 后服务端捕获并改状态。
+// 真实 PayPal 的差距（已知边界，见 README「支付」节 S7/PayPal）：
+//   - webhook 验签真实为 HMAC(crc32(body))，本库简化为纯 HMAC（沙箱够用）；
+//   - 返回/回调走 query_params（core 的 req.query_params 已解析），不依赖请求头。
+func gen_paypal_block(pay): string {
+  let mode = str(get(pay, "mode", "sandbox"));
+  let client_id = str(get(pay, "client_id", ""));
+  let secret_env = str(get(pay, "secret_env", "PAYPAL_KEY"));
+  let om = str(get(pay, "order_module", ""));
+  let onf = str(get(pay, "order_no_field", "order_no"));
+  let amf = str(get(pay, "amount_field", "amount_cents"));
+  let stf = str(get(pay, "status_field", "status"));
+  let currency = str(get(pay, "currency", "USD"));
+  let brand = str(get(pay, "brand", "lume-nsgm"));
+  let wpath = str(get(pay, "webhook_path", ""));
+  let dflt_ret = "http://127.0.0.1:8081";
+  // SQL 片段（双引号标识符在生成文件里是 \"，故此处用 \\\"）
+  let sel_amt = "SELECT \\\"" + amf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
+  let sel_st = "SELECT \\\"" + stf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
+  let upd_st = "UPDATE \\\"" + om + "\\\" SET \\\"" + stf + "\\\" = 'paid' WHERE \\\"" + onf + "\\\" = ?";
+  let b = "// ---- PayPal 支付接线（lume-nsgm 生成；client_id 来自配置，client_secret 走环境变量 " + secret_env + "）----\n"
+    + "// 与真实 PayPal 的差距：webhook 验签为 HMAC 简化版（真实含 crc32(body)，\n"
+    + "// 需 core 补 crc32 内建或外挂 sidecar）；返回/回调走 query_params（req 无 headers\n"
+    + "// 暴露）。详见 README「支付」节。\n"
+    + "let PAYPAL_CLIENT_ID = \"" + client_id + "\";\n"
+    + "let PAYPAL_CLIENT_SECRET_RAW = env(\"" + secret_env + "\");\n"
+    + "let PAYPAL_GATEWAY_RAW = env(\"PAY_GATEWAY\");\n"
+    + "let PAYPAL_RETURN_RAW = env(\"PAYPAL_RETURN_URL\");\n"
+    + "let PAYPAL_CFG = {\n"
+    + "  \"gw\": (PAYPAL_GATEWAY_RAW != null && PAYPAL_GATEWAY_RAW != \"\" ? str(PAYPAL_GATEWAY_RAW) : pay.paypal_base_url(\"" + mode + "\")),\n"
+    + "  \"client_id\": PAYPAL_CLIENT_ID,\n"
+    + "  \"client_secret\": (PAYPAL_CLIENT_SECRET_RAW != null ? str(PAYPAL_CLIENT_SECRET_RAW) : \"\"),\n"
+    + "  \"currency\": \"" + currency + "\",\n"
+    + "  \"brand\": \"" + brand + "\"\n"
+    + "};\n"
+    + "let PAYPAL_RETURN_BASE = (PAYPAL_RETURN_RAW != null && PAYPAL_RETURN_RAW != \"\") ? str(PAYPAL_RETURN_RAW) : \"" + dflt_ret + "\";\n\n"
+    // ---- post /api/pay/create：建单，返回 approve_url（前端跳转）----
+    + "post \"/api/pay/create\", func(req) {\n"
+    + "  if (get(req, \"body\", null) == null) { return { \"status\": 400, \"body\": { \"err\": \"empty body\" } }; }\n"
+    + "  let data = json(req.body);\n"
+    + "  if (data == null) { return { \"status\": 400, \"body\": { \"err\": \"invalid json body\" } }; }\n"
+    + "  let order_no = str(get(data, \"order_no\", \"\"));\n"
+    + "  if (order_no == \"\") { return { \"status\": 400, \"body\": { \"err\": \"missing order_no\" } }; }\n"
+    + "  let rows = sql_query(db.dsn(), \"" + sel_amt + "\", [order_no]);\n"
+    + "  if (len(rows) == 0) { return { \"status\": 404, \"body\": { \"err\": \"order not found\" } }; }\n"
+    + "  let cents = int(get(rows[0], \"" + amf + "\", 0));\n"
+    + "  let tk = pay.paypal_token(PAYPAL_CFG);\n"
+    + "  if (get(tk, \"ok\", false) != true) { return { \"status\": 502, \"body\": { \"err\": \"paypal token failed\", \"detail\": str(get(tk, \"err\", \"\")) } }; }\n"
+    + "  let return_url = PAYPAL_RETURN_BASE + \"/api/pay/return?order_no=\" + order_no;\n"
+    + "  let cancel_url = PAYPAL_RETURN_BASE + \"/api/pay/cancel?order_no=\" + order_no;\n"
+    + "  let cr = pay.paypal_create(PAYPAL_CFG, str(get(tk, \"token\", \"\")), order_no, cents, \"Order \" + order_no, return_url, cancel_url);\n"
+    + "  if (get(cr, \"ok\", false) != true) { return { \"status\": 502, \"body\": { \"err\": \"paypal create failed\", \"detail\": str(get(cr, \"err\", \"\")) } }; }\n"
+    + "  return { \"status\": 200, \"body\": { \"ok\": true, \"approve_url\": str(get(cr, \"approve_url\", \"\")), \"paypal_order_id\": str(get(cr, \"paypal_order_id\", \"\")) } };\n"
+    + "};\n\n"
+    // ---- get /api/pay/return：PayPal 跳回，捕获并改状态（幂等）----
+    + "get \"/api/pay/return\", func(req) {\n"
+    + "  let order_no = str(get(req.query_params, \"order_no\", \"\"));\n"
+    + "  let pptoken = str(get(req.query_params, \"token\", \"\"));\n"
+    + "  if (order_no == \"\" || pptoken == \"\") { return ui.page(\"支付返回\", \"\", \"<p>参数缺失</p>\"); }\n"
+    + "  let cur = sql_query(db.dsn(), \"" + sel_st + "\", [order_no]);\n"
+    + "  if (len(cur) > 0 && str(get(cur[0], \"" + stf + "\", \"\")) == \"paid\") {\n"
+    + "    return ui.page(\"支付成功\", \"\", \"<p>订单 \" + ui.esc(order_no) + \" 已支付。</p>\");\n"
+    + "  }\n"
+    + "  let tk = pay.paypal_token(PAYPAL_CFG);\n"
+    + "  if (get(tk, \"ok\", false) != true) { return ui.page(\"支付失败\", \"\", \"<p>获取 PayPal 令牌失败</p>\"); }\n"
+    + "  let cap = pay.paypal_capture(PAYPAL_CFG, str(get(tk, \"token\", \"\")), pptoken);\n"
+    + "  if (get(cap, \"ok\", false) != true) { return ui.page(\"支付失败\", \"\", \"<p>捕获失败：\" + ui.esc(str(get(cap, \"err\", \"\"))) + \"</p>\"); }\n"
+    + "  sql_write(db.dsn(), \"" + upd_st + "\", [order_no]);\n"
+    + "  return ui.page(\"支付成功\", \"\", \"<p>订单 \" + ui.esc(order_no) + \" 已支付。</p>\");\n"
+    + "};\n\n"
+    // ---- get /api/pay/cancel：用户取消 ----
+    + "get \"/api/pay/cancel\", func(req) {\n"
+    + "  let order_no = str(get(req.query_params, \"order_no\", \"\"));\n"
+    + "  return ui.page(\"支付取消\", \"\", \"<p>订单 \" + (order_no != \"\" ? ui.esc(order_no) : \"\") + \" 已取消。</p>\");\n"
+    + "};\n\n"
+    // ---- post /api/pay/webhook：可选，简化 HMAC 验签（webhook_path 配置时生成）----
+    + (wpath != "" ?
+        "post \"" + wpath + "\", func(req) {\n"
+      + "  let data = json(req.body);\n"
+      + "  if (data == null) { return { \"status\": 400, \"body\": { \"err\": \"invalid json\" } }; }\n"
+      + "  let id = str(get(data, \"verify_id\", \"\"));\n"
+      + "  let ts = str(get(data, \"verify_ts\", \"\"));\n"
+      + "  let sign = str(get(data, \"verify_sign\", \"\"));\n"
+      + "  let payload = str(get(data, \"payload\", \"\"));\n"
+      + "  if (!pay.paypal_verify_webhook(str(get(PAYPAL_CFG, \"client_secret\", \"\")), id, ts, payload, sign)) {\n"
+      + "    return { \"status\": 401, \"body\": { \"err\": \"signature mismatch\" } };\n"
+      + "  }\n"
+      + "  return { \"status\": 200, \"body\": { \"ok\": true } };\n"
+      + "};\n" : "");
+  return b;
+}
+
 // 生成 app.lume 入口：server 块 + 模块装配（import 即注册路由）+ 建表 + run()
 // 顺序对照 lume 仓 examples/demo.lume：server{} -> routes(经 import) -> run()
-export func gen_app_entry(out: string, mods): int {
+// pay 为 config.pay（validate_pay 已过）或 null；非 null 时注入支付接线块。
+export func gen_app_entry(out: string, mods, pay): int {
   let imports = "";
   let ddl_args = "";
   let i = 0;
@@ -89,18 +265,28 @@ export func gen_app_entry(out: string, mods): int {
     if (name != "") {
       imports = imports + "import \"modules/" + name + ".lume\" as " + name + ";\n";
       if (ddl_args != "") { ddl_args = ddl_args + ", "; }
-      ddl_args = ddl_args + name + ".DDL";
+      ddl_args = ddl_args + "{ \"name\": " + name + ".TBL, \"ddl\": " + name + ".DDL, \"cols\": " + name + ".COLS }";
     }
     i = i + 1;
   }
+  if (pay != null) {
+    imports = imports + "import \"lib/pay.lume\" as pay;\n";
+  }
   let content = "// app.lume — lume-nsgm 生成入口（勿手改）\n"
-    + "// 运行：lume-core app.lume  （lume-core 0.6.0+ 自带 server/route/run、sql 内建与 docroot 静态）\n"
-    + "server {\n  port = 8081;\n  workers = 4;\n  docroot = \"./www\";\n}\n\n"
+    + "// 运行：lume-core app.lume  （lume-core 0.7.0+ 自带 server/route/run、sql 内建与 docroot 静态）\n"
+    + "// 端口/host/workers 从环境变量读取（PORT/HOST/WORKERS），未设置时用下方默认值。\n"
+    + "// 注：env() 在 server{} 中生效需默认（解释器）后端；Docker 构建已强制 HAVE_LLVM=0。\n"
+    + "server {\n"
+    + "  port = (env(\"PORT\") != null && env(\"PORT\") != \"\") ? int(env(\"PORT\")) : 8081;\n"
+    + "  host = (env(\"HOST\") != null && env(\"HOST\") != \"\") ? env(\"HOST\") : \"127.0.0.1\";\n"
+    + "  workers = (env(\"WORKERS\") != null && env(\"WORKERS\") != \"\") ? int(env(\"WORKERS\")) : 4;\n"
+    + "  docroot = \"./www\";\n}\n\n"
     + "import \"lib/ui.lume\" as ui;\n"
     + "import \"lib/db.lume\" as db;\n"
     + imports
-    + "\n// 首次启动自动建表（CREATE TABLE IF NOT EXISTS 幂等）\n"
+    + "\n// 首次启动自动建表（CREATE TABLE IF NOT EXISTS），并对已有表补齐新增列（迁移）\n"
     + "db.init([" + ddl_args + "]);\n\n"
+    + (pay != null ? gen_pay_block(pay) + "\n" : "")
     + "// 首页导航\n"
     + "get \"/\", func(req) {\n"
     + "  let body = \"<h1>lume-nsgm 生成的项目</h1>\\n<ul>\\n\";\n";
@@ -122,7 +308,8 @@ export func gen_app_entry(out: string, mods): int {
 }
 
 // 串联：建目录 -> 复制静态基座 -> ui.lume -> app.lume -> web/ React 前端
-export func base_project(out: string, mods): int {
+// pay 为 config.pay（或 null）；非 null 时 app.lume 注入支付接线（见 gen_pay_block）
+export func base_project(out: string, mods, pay): int {
   mkdir(out);
   mkdir(out + "/lib");
   mkdir(out + "/modules");
@@ -132,7 +319,7 @@ export func base_project(out: string, mods): int {
 
   copy_base(out);
   gen_ui(out, mods);
-  gen_app_entry(out, mods);
+  gen_app_entry(out, mods, pay);
   rg.gen_web(out, mods);
   return 0;
 }

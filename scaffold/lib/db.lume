@@ -1,6 +1,6 @@
 // db.lume — SQLite 存取辅助（lume-nsgm 生成项目的静态基座）
 //
-// sql_query/sql_write 由 lume-core（0.6.0+）内建提供：? 占位符参数绑定
+// sql_query/sql_write 由 lume-core（0.7.0+）内建提供：? 占位符参数绑定
 // （值永不进 SQL 字符串）。SQLite 文件路径即 DSN；仅支持 SQLite
 // （postgres/mysql 不在 core 内建范围内）。
 
@@ -11,18 +11,51 @@ if (from_env != null && from_env != "") { DSN = from_env; }
 
 export func dsn(): string { return DSN; }
 
-// 启动建表：CREATE TABLE IF NOT EXISTS 幂等（sql_write 放行 CREATE TABLE）
-export func init(ddls): int {
-  // db_layer 以 SQLITE_OPEN_READWRITE 打开（不带 CREATE）——库文件必须已存在；
-  // 0 字节文件对 SQLite 就是空库，首次启动垫上
+// 启动建表 + 迁移：
+//   specs 每项 = { "name": 表名, "ddl": DDL(建表), "cols": [{name,type_sql,not_null,auto,default}] }
+//   先 CREATE TABLE IF NOT EXISTS（幂等），再对已有表补齐缺失列（改 schema 加字段后
+//   重新生成不会破坏旧库）。
+// 库文件以 0 字节文件垫底（SQLite 空库），db_layer 以 READWRITE 打开。
+export func init(specs): int {
   if (read_file(DSN) == null) { write_file(DSN, ""); }
   let i = 0;
-  while (i < len(ddls)) {
-    let stmt = get(ddls, i, "");
-    if (stmt != "") {
-      sql_write(DSN, stmt, []);
-    }
+  while (i < len(specs)) {
+    let spec = get(specs, i, null);
+    if (spec == null) { i = i + 1; continue; }
+    let ddl = get(spec, "ddl", "");
+    if (ddl != "") { sql_write(DSN, ddl, []); }
+    let cols = get(spec, "cols", []);
+    let name = get(spec, "name", "");
+    if (name != "" && len(cols) > 0) { migrate_cols(DSN, name, cols); }
     i = i + 1;
+  }
+  return 0;
+}
+
+// 对已有表补齐缺失列：SELECT name FROM pragma_table_info() 取现有列
+// （表值函数走 SELECT 前缀，只读连接可用；语句式 PRAGMA 被 sql_query 拒），
+// 缺哪列就 ALTER TABLE ADD COLUMN。
+// 迁移只发裸 "<列> <类型>"，不带 NOT NULL / DEFAULT：SQLite 对既有行加列
+// 不允许 CURRENT_TIMESTAMP 默认值，NOT NULL 又必须有非 NULL 默认值；裸类型
+// 让旧行新列读作 NULL，写入路径（INSERT 显式带全部表单列）不受影响。
+export func migrate_cols(dsn: string, tbl: string, cols): int {
+  let info = sql_query(dsn, "SELECT name FROM pragma_table_info('" + tbl + "')", []);
+  let existing = ",";
+  let k = 0;
+  while (k < len(info)) {
+    existing = existing + get(info[k], "name", "") + ",";
+    k = k + 1;
+  }
+  let j = 0;
+  while (j < len(cols)) {
+    let c = cols[j];
+    let cn = get(c, "name", "");
+    if (cn == "") { j = j + 1; continue; }
+    // auto 是 bool：lume 运行时 bool==1 恒 false（且 int(true)=0），必须 == true
+    if (get(c, "auto", false) == true) { j = j + 1; continue; } // 自增主键不参与补齐
+    if (contains(existing, "," + cn + ",")) { j = j + 1; continue; } // 已存在，跳过
+    sql_write(dsn, "ALTER TABLE \"" + tbl + "\" ADD COLUMN \"" + cn + "\" " + get(c, "type_sql", "TEXT"), []);
+    j = j + 1;
   }
   return 0;
 }
@@ -43,7 +76,9 @@ export func qparams(req) {
 export func qs_int(qp, k: string, dflt: int): int {
   let raw = get(qp, k, "");
   if (raw == "") { return dflt; }
-  return int(raw);
+  let r = try(() => int(raw));
+  if (get(r, "err", null) != null) { return dflt; }
+  return get(r, "ok", dflt);
 }
 
 // list 拼接（dst += src），返回 dst

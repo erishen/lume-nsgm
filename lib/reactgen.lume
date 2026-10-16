@@ -64,7 +64,7 @@ export func gen_app_tsx(mods): string {
       imports = imports + "import " + C + "Page from \"./pages/" + C + "Page\";\n";
       tabs = tabs + "  { name: \"" + name + "\", label: \"" + label + "\", comp: " + C + "Page },\n";
       nav_links = nav_links + "          <a key={\"" + name + "\"} className={active && active.name === \"" + name + "\" ? \"active\" : \"\"} href={\"#/\" + \"" + name + "\"}>{\"" + label + "\"}</a>\n";
-      home_items = home_items + "            <li key={\"" + name + "\"}><a href={\"#/\" + \"" + name + "\"}>\"" + label + "\"</a></li>\n";
+      home_items = home_items + "            <li key={\"" + name + "\"}><a href={\"#/\" + \"" + name + "\"}>{\"" + label + "\"}</a></li>\n";
     }
     i = i + 1;
   }

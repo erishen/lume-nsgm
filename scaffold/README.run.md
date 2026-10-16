@@ -2,7 +2,7 @@
 
 `lume-nsgm` 通过 `make run`（读 `example-config.json`）生成一套**以 lume 为底**
 的全栈工程，落在 `./gen`：**React 前端（web/）** + SSR 回退页面 + REST API +
-SQLite 存储。服务端运行时只需 **lume-core 单二进制**（0.6.0+ 自带
+SQLite 存储。服务端运行时只需 **lume-core 单二进制**（0.7.0+ 自带
 `server`/`route`/`run`、`sql_query`/`sql_write` 内建、docroot 静态与 `:name`
 动态路由）；前端开发/构建用 pnpm（Vite + React）。
 

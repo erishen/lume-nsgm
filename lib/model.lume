@@ -109,6 +109,11 @@ export func sql_not_null(f): string {
 // 默认值子句（SQLite 方言。SQLite 无 ON UPDATE，update_date 的时间戳
 // 语义由生成的 UPDATE 语句显式携带 update_date = CURRENT_TIMESTAMP 实现）
 export func sql_default(f): string {
+  // 字段级显式默认值优先（如订单 status 的 "'pending'"）；
+  // 形状由 validate.lume 的 valid_sql_literal 校验（单引号字面量），
+  // 因为该值原样进 DDL——宽松即注入面。
+  let d = str(get(f, "default", ""));
+  if (d != "") { return " DEFAULT " + d; }
   let t = ftype(f);
   let n = fname(f);
   if (t == "timestamp" && n == "create_date") { return " DEFAULT CURRENT_TIMESTAMP"; }

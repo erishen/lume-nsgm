@@ -11,6 +11,12 @@
 let TYPES = ",varchar,text,integer,decimal,boolean,date,datetime,timestamp,";
 let LOWER = "abcdefghijklmnopqrstuvwxyz";
 let IDENT = "abcdefghijklmnopqrstuvwxyz0123456789_";
+// SQL 单引号字面量的合法字符集（DDL 注入面收窄）
+let LIT_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_ -";
+// 商户标识/头字段的合法字符集（进 Authorization 头与 JSON body）
+let TOKEN_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-";
+// 环境变量名字符集
+let ENV_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
 
 // 标识符规则：^[a-z][a-z0-9_]*$
 export func valid_ident(s: string): int {
@@ -20,6 +26,45 @@ export func valid_ident(s: string): int {
   let i = 1;
   while (i < n) {
     if (!contains(IDENT, substr(s, i, 1))) { return 0; }
+    i = i + 1;
+  }
+  return 1;
+}
+
+// SQL 单引号字面量形状：'...'（内部仅 A-Za-z0-9_ - 与空格），2..65 字节。
+// 用于字段级 "default"——该值原样拼进 DDL，必须收窄。
+export func valid_sql_literal(s: string): int {
+  let n = len(s);
+  if (n < 2 || n > 65) { return 0; }
+  if (substr(s, 0, 1) != "'" || substr(s, n - 1, 1) != "'") { return 0; }
+  let i = 1;
+  while (i < n - 1) {
+    if (!contains(LIT_CHARS, substr(s, i, 1))) { return 0; }
+    i = i + 1;
+  }
+  return 1;
+}
+
+// 头/body 令牌形状：非空、<=64、[A-Za-z0-9_-]（appid/mchid/serial_no 等）
+func valid_token(s: string): int {
+  let n = len(s);
+  if (n == 0 || n > 64) { return 0; }
+  let i = 0;
+  while (i < n) {
+    if (!contains(TOKEN_CHARS, substr(s, i, 1))) { return 0; }
+    i = i + 1;
+  }
+  return 1;
+}
+
+// 环境变量名形状：^[A-Z][A-Z0-9_]*$（secret_env 会原样进 env("...") 调用）
+func valid_env_name(s: string): int {
+  let n = len(s);
+  if (n == 0) { return 0; }
+  if (!contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", substr(s, 0, 1))) { return 0; }
+  let i = 1;
+  while (i < n) {
+    if (!contains(ENV_CHARS, substr(s, i, 1))) { return 0; }
     i = i + 1;
   }
   return 1;
@@ -96,8 +141,217 @@ export func validate_config(cfg) {
               push(errs, fat + ": unknown type \"" + ty + "\" (supported: varchar/text/integer/decimal/boolean/date/datetime/timestamp)");
             }
           }
+          let fd = get(f, "default", null);
+          if (fd != null && str(fd) != "") {
+            if (valid_sql_literal(str(fd)) == 0) {
+              push(errs, fat + ": \"default\" must be a single-quoted literal like \"'pending'\" (inner chars: A-Za-z0-9_ -, got \"" + str(fd) + "\") — it is interpolated into the DDL");
+            }
+          }
         }
         j = j + 1;
+      }
+    }
+    i = i + 1;
+  }
+  // pay 段（可选）：支付接线校验（密钥只认环境变量名，值不进配置）
+  let pay = get(cfg, "pay", null);
+  if (pay != null) {
+    let perrs = validate_pay(pay, mods);
+    let p = 0;
+    while (p < len(perrs)) {
+      push(errs, get(perrs, p, ""));
+      p = p + 1;
+    }
+  }
+  return errs;
+}
+
+// pay 段校验（可选；config.pay 缺失时返回空数组）。
+// 约定（见 example-pay.json）：gateway/appid/mchid/serial_no 进 HTTP 头与 body，
+// 形状从紧；secret_env 只给环境变量名，密钥值永不出现在配置/镜像层；
+// order_module + 三个字段名决定回调写哪张表的哪些列，必须真实存在。
+export func validate_pay(pay, mods) {
+  let errs = [];
+  if (pay == null) { return errs; }
+  let at = "pay";
+  let provider = str(get(pay, "provider", "wechat"));
+  if (provider == "paypal") { return validate_pay_paypal(pay, mods); }
+  let req_keys = ["gateway", "appid", "mchid", "serial_no", "secret_env",
+                  "order_module", "order_no_field", "amount_field", "status_field"];
+  let i = 0;
+  while (i < len(req_keys)) {
+    let k = req_keys[i];
+    let v = get(pay, k, null);
+    if (v == null || str(v) == "") {
+      push(errs, at + ": missing required \"" + k + "\"");
+    }
+    i = i + 1;
+  }
+  // gateway：http(s) URL（原样进 http_post 与 JSON body）
+  let gw = str(get(pay, "gateway", ""));
+  if (gw != "") {
+    if (!contains(gw, "http://") && !contains(gw, "https://")) {
+      push(errs, at + ".gateway: must start with http:// or https:// (got \"" + gw + "\")");
+    }
+    if (contains(gw, " ") || contains(gw, "\"") || contains(gw, "'")) {
+      push(errs, at + ".gateway: must not contain spaces or quotes (got \"" + gw + "\")");
+    }
+  }
+  // 商户标识：令牌形状（进 Authorization 头）
+  let tk = ["appid", "mchid", "serial_no"];
+  i = 0;
+  while (i < len(tk)) {
+    let v = str(get(pay, tk[i], ""));
+    if (v != "" && valid_token(v) == 0) {
+      push(errs, at + "." + tk[i] + ": must match [A-Za-z0-9_-]{1,64} (got \"" + v + "\")");
+    }
+    i = i + 1;
+  }
+  // secret_env：环境变量名（值只在运行环境里）
+  let se = str(get(pay, "secret_env", ""));
+  if (se != "" && valid_env_name(se) == 0) {
+    push(errs, at + ".secret_env: must match [A-Z][A-Z0-9_]* (got \"" + se + "\") — the secret value itself must never appear in config");
+  }
+  // notify_path（可选）：以 / 开头的路径
+  let np = get(pay, "notify_path", null);
+  if (np != null && str(np) != "") {
+    if (substr(str(np), 0, 1) != "/" || contains(str(np), " ") || contains(str(np), "\"")) {
+      push(errs, at + ".notify_path: must be a path starting with \"/\" without spaces/quotes (got \"" + str(np) + "\")");
+    }
+  }
+  // order_module：必须是已定义模块（回调要读写它的表）
+  let om = str(get(pay, "order_module", ""));
+  let order_fields = null;
+  if (om != "") {
+    if (valid_ident(om) == 0) {
+      push(errs, at + ".order_module: must match [a-z][a-z0-9_]* (got \"" + om + "\")");
+    } else {
+      let found = 0;
+      let k = 0;
+      while (k < len(mods)) {
+        let mod = get(mods, k, null);
+        if (mod != null && str(get(mod, "name", "")) == om) {
+          found = 1;
+          order_fields = get(mod, "fields", []);
+        }
+        k = k + 1;
+      }
+      if (found == 0) {
+        push(errs, at + ".order_module: \"" + om + "\" is not a defined module (pay routes read/write that table)");
+      }
+    }
+  }
+  // 三个字段名：标识符形状 + 必须存在于 order_module
+  let fk = ["order_no_field", "amount_field", "status_field"];
+  i = 0;
+  while (i < len(fk)) {
+    let fv = str(get(pay, fk[i], ""));
+    if (fv != "") {
+      if (valid_ident(fv) == 0) {
+        push(errs, at + "." + fk[i] + ": must match [a-z][a-z0-9_]* (got \"" + fv + "\")");
+      } else {
+        if (order_fields != null) {
+          let has = 0;
+          let k = 0;
+          while (k < len(order_fields)) {
+            let f = get(order_fields, k, null);
+            if (f != null && str(get(f, "name", "")) == fv) { has = 1; }
+            k = k + 1;
+          }
+          if (has == 0) {
+            push(errs, at + "." + fk[i] + ": \"" + fv + "\" is not a field of module \"" + om + "\"");
+          }
+        }
+      }
+    }
+    i = i + 1;
+  }
+  return errs;
+}
+
+// PayPal 段校验（provider: paypal）：client_id（公开标识，配置内）/ secret_env
+// （client_secret 的环境变量名，值绝不进配置）/ mode（sandbox|live）/ 订单模块与三字段。
+// order_module + 三字段的校验与微信同逻辑（必须真实存在于 modules）。
+export func validate_pay_paypal(pay, mods) {
+  let errs = [];
+  if (pay == null) { return errs; }
+  let at = "pay";
+  let req_keys = ["client_id", "secret_env", "mode",
+                  "order_module", "order_no_field", "amount_field", "status_field"];
+  let i = 0;
+  while (i < len(req_keys)) {
+    let k = req_keys[i];
+    let v = get(pay, k, null);
+    if (v == null || str(v) == "") {
+      push(errs, at + ": missing required \"" + k + "\"");
+    }
+    i = i + 1;
+  }
+  // mode：sandbox | live
+  let mode = str(get(pay, "mode", ""));
+  if (mode != "" && mode != "sandbox" && mode != "live") {
+    push(errs, at + ".mode: must be \"sandbox\" or \"live\" (got \"" + mode + "\")");
+  }
+  // client_id：令牌形状（公开标识，进 Authorization 头）
+  let cid = str(get(pay, "client_id", ""));
+  if (cid != "" && valid_token(cid) == 0) {
+    push(errs, at + ".client_id: must match [A-Za-z0-9_-]{1,64} (got \"" + cid + "\")");
+  }
+  // secret_env：环境变量名（值只在运行环境里）
+  let se = str(get(pay, "secret_env", ""));
+  if (se != "" && valid_env_name(se) == 0) {
+    push(errs, at + ".secret_env: must match [A-Z][A-Z0-9_]* (got \"" + se + "\") — the secret value itself must never appear in config");
+  }
+  // webhook_path（可选）：以 / 开头的路径
+  let wpath = get(pay, "webhook_path", null);
+  if (wpath != null && str(wpath) != "") {
+    if (substr(str(wpath), 0, 1) != "/" || contains(str(wpath), " ") || contains(str(wpath), "\"")) {
+      push(errs, at + ".webhook_path: must be a path starting with \"/\" without spaces/quotes (got \"" + str(wpath) + "\")");
+    }
+  }
+  // order_module：必须是已定义模块
+  let om = str(get(pay, "order_module", ""));
+  let order_fields = null;
+  if (om != "") {
+    if (valid_ident(om) == 0) {
+      push(errs, at + ".order_module: must match [a-z][a-z0-9_]* (got \"" + om + "\")");
+    } else {
+      let found = 0;
+      let k = 0;
+      while (k < len(mods)) {
+        let mod = get(mods, k, null);
+        if (mod != null && str(get(mod, "name", "")) == om) {
+          found = 1;
+          order_fields = get(mod, "fields", []);
+        }
+        k = k + 1;
+      }
+      if (found == 0) {
+        push(errs, at + ".order_module: \"" + om + "\" is not a defined module (pay routes read/write that table)");
+      }
+    }
+  }
+  // 三个字段名：标识符形状 + 必须存在于 order_module
+  let fk = ["order_no_field", "amount_field", "status_field"];
+  i = 0;
+  while (i < len(fk)) {
+    let fv = str(get(pay, fk[i], ""));
+    if (fv != "") {
+      if (valid_ident(fv) == 0) {
+        push(errs, at + "." + fk[i] + ": must match [a-z][a-z0-9_]* (got \"" + fv + "\")");
+      } else {
+        if (order_fields != null) {
+          let has = 0;
+          let k = 0;
+          while (k < len(order_fields)) {
+            let f = get(order_fields, k, null);
+            if (f != null && str(get(f, "name", "")) == fv) { has = 1; }
+            k = k + 1;
+          }
+          if (has == 0) {
+            push(errs, at + "." + fk[i] + ": \"" + fv + "\" is not a field of module \"" + om + "\"");
+          }
+        }
       }
     }
     i = i + 1;

@@ -1,0 +1,28 @@
+{
+  "db": "shop_demo",
+  "out": "./gen",
+  "modules": [
+    {
+      "name": "order",
+      "fields": [
+        { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
+        { "name": "order_no", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "订单号" },
+        { "name": "amount_cents", "type": "integer", "required": 1, "showInList": 1, "showInForm": 1, "comment": "金额（分）" },
+        { "name": "status", "type": "varchar", "default": "'pending'", "system": 1, "showInList": 1, "showInForm": 0, "searchable": 1, "comment": "状态" },
+        { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "showInForm": 0, "comment": "创建时间" }
+      ]
+    }
+  ],
+  "pay": {
+    "gateway": "http://127.0.0.1:18097",
+    "appid": "wxmockappid",
+    "mchid": "1600000000",
+    "serial_no": "MOCK_SERIAL_001",
+    "secret_env": "PAY_KEY",
+    "order_module": "order",
+    "order_no_field": "order_no",
+    "amount_field": "amount_cents",
+    "status_field": "status",
+    "notify_path": "/api/pay/notify"
+  }
+}
