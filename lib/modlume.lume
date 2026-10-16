@@ -80,7 +80,10 @@ export func build_fields(fs, n: int) {
   return fields;
 }
 
-export func gen_module(ctrl: string, fs, n: int): string {
+// refund = { "no_field": "order_no", "st_field": "status" } 时，列表行动作列
+// 追加「退款」链接（仅 status==paid 的行显示，指向 /shop/refund/<订单号>）；
+// null（无店面配置或非订单模块）时不生成，保持纯 CRUD。
+export func gen_module(ctrl: string, fs, n: int, refund): string {
   let fields = build_fields(fs, n);
   let fidx = m.form_idx(fs, n);
   let ddl = trim(sqlgen.gen_sql(ctrl, fs, n, ""));
@@ -89,7 +92,10 @@ export func gen_module(ctrl: string, fs, n: int): string {
     "fields": fields,
     "ddl": lume_str(ddl),
     "insert_sql": lume_str(build_insert(ctrl, fs, fidx)),
-    "update_sql": lume_str(build_update(ctrl, fs, fidx))
+    "update_sql": lume_str(build_update(ctrl, fs, fidx)),
+    "refund_on": refund == null ? "" : "1",
+    "refund_no_f": refund == null ? "order_no" : str(get(refund, "no_field", "order_no")),
+    "refund_st_f": refund == null ? "status" : str(get(refund, "st_field", "status"))
   };
   let tpl_text = read_file("templates/mod.tpl");
   if (tpl_text == null) { return "// ERROR: templates/mod.tpl missing"; }

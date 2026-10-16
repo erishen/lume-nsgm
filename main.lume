@@ -12,9 +12,10 @@ import "lib/scaffold.lume" as sc;
 import "lib/base.lume" as base;
 import "lib/validate.lume" as v;
 
-func gen_one(ctrl: string, fs, n: int, db: string, out: string): int {
+// refund 非 null 时（有店面+支付的订单模块）列表行注入退款链接，见 modlume.gen_module
+func gen_one(ctrl: string, fs, n: int, db: string, out: string, refund): int {
   let sql_text = sql.gen_sql(ctrl, fs, n, db);
-  let module_text = modlume.gen_module(ctrl, fs, n);
+  let module_text = modlume.gen_module(ctrl, fs, n, refund);
   sc.write_tree(out, ctrl, sql_text, module_text);
   print("generated: " + ctrl + " -> " + out);
   return 0;
@@ -36,7 +37,7 @@ func cmd_create(args): int {
     { "name": "email", "type": "varchar", "required": 0, "primary": 0, "auto": 0, "system": 0, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "邮箱" },
     { "name": "create_date", "type": "timestamp", "required": 0, "primary": 0, "auto": 0, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "创建时间" }
   ];
-  gen_one(ctrl, fs, len(fs), db, out);
+  gen_one(ctrl, fs, len(fs), db, out, null);
   base.base_project(out, [{ "name": ctrl, "fields": fs }], null, null);
   print("runnable project scaffolded at " + out + " (see README.run.md)");
   return 0;
@@ -72,7 +73,7 @@ func cmd_init(args): int {
       }
     }
   }
-  gen_one(ctrl, fs, len(fs), db, out);
+  gen_one(ctrl, fs, len(fs), db, out, null);
   base.base_project(out, [{ "name": ctrl, "fields": fs }], null, null);
   print("init done: " + ctrl + " (" + str(len(fs)) + " fields)");
   return 0;
@@ -110,13 +111,28 @@ func cmd_config(path: string): int {
   let pay = get(cfg, "pay", null);
   let shop = get(cfg, "shop", null);
   base.base_project(out, mods, pay, shop);
+  // 店面存在（pay+shop）时，订单模块列表行注入「退款」链接（与 gen_shop_block 的
+  // /shop/refund 路由同条件）；字段名与 shop 块共用 pay.order_no_field/status_field。
+  // 注意 lume 的 get() 不接受 null 容器，pay 为 null（无支付配置）时走默认值
+  let om = "order";
+  let onf = "order_no";
+  let stf = "status";
+  if (pay != null) {
+    om = str(get(pay, "order_module", "order"));
+    onf = str(get(pay, "order_no_field", "order_no"));
+    stf = str(get(pay, "status_field", "status"));
+  }
   let i = 0;
   while (i < len(mods)) {
     let mod = mods[i];
     let ctrl = get(mod, "name", "");
     if (ctrl != "") {
       let fs = get(mod, "fields", []);
-      gen_one(ctrl, fs, len(fs), db, out);
+      let refund = null;
+      if (pay != null && shop != null && ctrl == om) {
+        refund = { "no_field": onf, "st_field": stf };
+      }
+      gen_one(ctrl, fs, len(fs), db, out, refund);
     }
     i = i + 1;
   }

@@ -74,6 +74,8 @@ table.grid tbody tr:last-child td { border-bottom: none; }
 table.grid td a { color: var(--brand); text-decoration: none; margin-right: 6px; }
 table.grid td a:hover { text-decoration: underline; }
 table.grid td a.del { color: var(--danger); }
+/* 订单列表「退款」入口（仅 paid 行渲染，指向 /shop/refund 确认页） */
+table.grid td a.refund { color: var(--accent, #2563eb); font-weight: 600; }
 /* 操作列右对齐 */
 table.grid th.op, table.grid td.op { text-align: right; white-space: nowrap; }
 

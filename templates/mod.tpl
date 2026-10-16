@@ -138,7 +138,11 @@ func list_body(qp) {
     }
     let rid = str(get(r, "id", 0));
     body = body + "<td class=\"op\"><a href=\"/{{ctrl}}/edit/" + rid + "\">编辑</a> "
-      + "<a class=\"del\" href=\"/{{ctrl}}/del/" + rid + "\">删除</a></td></tr>\n";
+      + "<a class=\"del\" href=\"/{{ctrl}}/del/" + rid + "\">删除</a>"
+{{#if refund_on}}
+      + (str(get(r, "{{refund_st_f}}", "")) == "paid" ? " <a class=\"refund\" href=\"/shop/refund/" + ui.esc(str(get(r, "{{refund_no_f}}", ""))) + "\">退款</a>" : "")
+{{/if}}
+      + "</td></tr>\n";
     i = i + 1;
   }
   body = body + "</tbody></table></div>\n";

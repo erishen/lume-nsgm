@@ -277,6 +277,10 @@ PY
     || fail "幂等：重买新单应 pending"
   echo "ok   幂等（ik）：首单 pending -> 同 ik 复用 -> 支付 -> 同 ik 重买开新单（SHOP-<ik>-r<ts>）"
   echo "ok   店面：商品列表 -> 购买下单 -> code_url 收银台 -> mock 支付 -> paid 落库"
+  # 订单后台（/order）paid 行动作列应注入「退款」链接（用户诉求：UI 上能找到退款入口）
+  OLIST="$(curl -s --noproxy '*' "$PB/order")"
+  echo "$OLIST" | grep -q "/shop/refund/$SONO" \
+    || fail "订单后台 paid 行应带退款链接: $(echo "$OLIST" | grep -o 'class=\"op\">.*' | head -3)"
 
   # ---- 退款（微信）：确认页 -> mock 网关受理 -> refunded 落库 -> 重复退幂等 ----
   # 场景：/shop/refund/:ono 确认页（?confirm=1 执行）。仅 paid 可退；pending 单
@@ -300,6 +304,9 @@ PY
   # 重复退（幂等）：本地状态守卫，仍展示已退款
   curl -s --noproxy '*' "$PB/shop/refund/$SONO?confirm=1" | grep -q '已退款' \
     || fail "重复退应幂等展示已退款"
+  # 已退款行不应再显示退款链接（条件渲染只认 paid）
+  curl -s --noproxy '*' "$PB/order" | grep -q "/shop/refund/$SONO" \
+    && fail "refunded 行不应再带退款链接" || true
   echo "ok   退款（微信）：确认页 -> mock 网关受理 -> refunded 落库 -> 重复退幂等 -> pending 拒退"
 else
   echo "SKIP 支付阶段: 无 python3"
@@ -421,6 +428,9 @@ PY
   # 未知订单
   curl -s --noproxy '*' "$PPB/shop/refund/NOPE-1?confirm=1" | grep -q '订单不存在' \
     || fail "未知订单退款应提示不存在"
+  # 订单后台（/order）paid 行动作列应注入「退款」链接（用户诉求：UI 上能找到退款入口）
+  curl -s --noproxy '*' "$PPB/order" | grep -q "/shop/refund/$ONO" \
+    || fail "订单后台 paid 行应带退款链接"
   # 正常路径：return 处理器应回填 paypal_order_id + capture_id（退款凭据）
   curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"capture_id":"MOCK-CAPTURE-' \
     || fail "return 处理器应回填 capture_id"
@@ -441,6 +451,9 @@ PY
   # 重复退（幂等）：本地状态守卫，仍展示已退款
   curl -s --noproxy '*' "$PPB/shop/refund/$ONO?confirm=1" | grep -q '已退款' \
     || fail "重复退应幂等展示已退款"
+  # 已退款行不应再显示退款链接（条件渲染只认 paid）
+  curl -s --noproxy '*' "$PPB/order" | grep -q "/shop/refund/$ONO" \
+    && fail "refunded 行不应再带退款链接" || true
   # mock 侧直探：查单兜底（GET order 返回 captures）+ 同一捕获重复退 422
   # （放在所有应用侧调用之后：直取 token 会顶掉 mock 的 PP_ISSUED_TOKEN）
   PP_PPID="$(curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -o '"paypal_order_id":"[^"]*"' | head -1 | sed 's/"paypal_order_id":"//;s/"$//')"
@@ -462,5 +475,5 @@ else
   echo "SKIP 支付阶段(PayPal): 无 python3"
 fi
 
-echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / 微信支付全链路 / PayPal 全链路 / 退款全链路)"
+echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / 微信支付全链路 / PayPal 全链路 / 退款全链路 / 订单后台退款入口)"
 exit 0

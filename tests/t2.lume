@@ -11,7 +11,15 @@ let fs = [
   { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
 ];
 
-let mod = modlume.gen_module("user", fs, len(fs));
+let mod = modlume.gen_module("user", fs, len(fs), null);
+// 订单模块（有店面+支付）：列表行注入「退款」链接，仅 paid 行渲染
+let ofs = [
+  { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "comment": "ID" },
+  { "name": "order_no", "type": "varchar", "required": 1, "showInList": 1, "comment": "订单号" },
+  { "name": "status", "type": "varchar", "showInList": 1, "comment": "状态" },
+  { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
+];
+let omod = modlume.gen_module("order", ofs, len(ofs), { "no_field": "order_no", "st_field": "status" });
 
 let fails = 0;
 
@@ -39,6 +47,11 @@ fails = fails + a.assert_not_contains(mod, "queryValues", "t2: no legacy TS-era 
 // UI 增强钩子：删除链接带 .del（app.js confirm 拦截）、时间列暴露 data-ts
 fails = fails + a.assert_contains(mod, "class=\\\"del\\\"", "t2: delete link carries .del class for confirm");
 fails = fails + a.assert_contains(mod, "data-ts=", "t2: timestamp cells expose data-ts for JS formatting");
+
+// 退款入口：普通模块（refund=null）不出现；订单模块（refund 非 null）出现且仅 paid 行渲染
+fails = fails + a.assert_not_contains(mod, "shop/refund", "t2: plain module has no refund link");
+fails = fails + a.assert_contains(omod, "/shop/refund/\" + ui.esc(str(get(r, \"order_no\", \"\")))", "t2: order module list injects refund link");
+fails = fails + a.assert_contains(omod, "str(get(r, \"status\", \"\")) == \"paid\"", "t2: refund link gated on paid status");
 
 func main(): int {
   if (fails == 0) { print("ALL PASS (t2: modlume routes & pages)"); }
