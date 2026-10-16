@@ -237,6 +237,8 @@ PY
   SHOP_HTML="$(curl -s --noproxy '*' "$PB/shop")"
   echo "$SHOP_HTML" | grep -q '机械键盘' || fail "店面应播种演示商品: $(echo "$SHOP_HTML" | head -5)"
   echo "$SHOP_HTML" | grep -q '¥399.00' || fail "店面价格应格式化为元（分->x.xx）"
+  # 店面必须明示支付渠道（用户诉求）：微信变体列表页应带「微信支付」徽标
+  echo "$SHOP_HTML" | grep -q '微信支付' || fail "店面应明示支付方式为微信支付: $(echo "$SHOP_HTML" | head -5)"
   curl -s --noproxy '*' -o /dev/null "$PB/shop/buy/1" || fail "购买请求失败"
   SONO="$(curl -s --noproxy '*' "$PB/api/order" | grep -oE '"order_no":"SHOP-[^"]*"' | head -1 | sed 's/"order_no":"//;s/"$//')"
   [ -n "$SONO" ] || fail "购买应产生 SHOP-* 订单"
@@ -244,6 +246,9 @@ PY
   echo "$PAY_HTML" | grep -q 'weixin://wxpay/bizpayurl' || fail "收银台应展示 code_url: $(echo "$PAY_HTML" | head -8)"
   curl -s --noproxy '*' -o /dev/null "$PB/shop/mock-pay/$SONO" || fail "模拟支付请求失败"
   curl -s --noproxy '*' "$PB/shop/result/$SONO" | grep -q '支付成功' || fail "模拟支付后结果页应为支付成功"
+  curl -s --noproxy '*' "$PB/shop/result/$SONO" | grep -q '微信支付' || fail "结果页应明示支付方式为微信支付"
+  # 订单不存在等异常页同样应带渠道徽标（支付 UI 全域可见）
+  curl -s --noproxy '*' "$PB/shop/result/NOPE-1" | grep -q '微信支付' || fail "订单不存在页应明示支付方式为微信支付"
   curl -s --noproxy '*' "$PB/api/order?q=$SONO" | grep -q '"status":"paid"' || fail "店面支付后订单应落库 paid"
   # ---- 幂等（ik）：同 ik 重复点击/刷新复用同一笔 pending 单；已支付则开新单（重买）----
   # 用户明确诉求：避免重复下单。商品列表「购买」链接带 ik（幂等 Key）= id-now()，
@@ -362,6 +367,18 @@ PY
     -H 'Content-Type: application/json' \
     -d '{"verify_id":"x","verify_ts":"1","verify_sign":"deadbeef","payload":"{}"}')"
   echo "$BAD_WH" | grep -q 'signature mismatch' || fail "PayPal webhook 坏签名应拒: $BAD_WH"
+  # 6) 店面（PayPal 变体）：列表/收银台/结果页都应明示 PayPal、价格以 $ 计价
+  PP_SHOP="$(curl -s --noproxy '*' "$PPB/shop")"
+  echo "$PP_SHOP" | grep -q 'PayPal' || fail "PayPal 店面应明示支付方式 PayPal: $(echo "$PP_SHOP" | head -5)"
+  echo "$PP_SHOP" | grep -q '\$399.00' || fail "PayPal 店面价格应以 \$ 计价（分->x.xx）"
+  curl -s --noproxy '*' -o /dev/null "$PPB/shop/buy/1" || fail "PayPal 店面购买请求失败"
+  PP_SONO="$(curl -s --noproxy '*' "$PPB/api/order" | grep -oE '"order_no":"SHOP-[^"]*"' | head -1 | sed 's/"order_no":"//;s/"$//')"
+  [ -n "$PP_SONO" ] || fail "PayPal 店面购买应产生 SHOP-* 订单"
+  PP_PAY_HTML="$(curl -s --noproxy '*' "$PPB/shop/pay/$PP_SONO")"
+  echo "$PP_PAY_HTML" | grep -q '前往 PayPal 支付' || fail "PayPal 收银台应展示前往 PayPal 支付: $(echo "$PP_PAY_HTML" | head -8)"
+  curl -s --noproxy '*' "$PPB/shop/result/$PP_SONO" | grep -q 'PayPal' || fail "PayPal 结果页应明示 PayPal"
+  curl -s --noproxy '*' "$PPB/shop/result/NOPE-1" | grep -q 'PayPal' || fail "PayPal 订单不存在页应明示 PayPal"
+  echo "ok   店面(PayPal)：列表明示 PayPal + \$ 计价 -> 收银台 approve_url -> 结果页徽标"
   echo "ok   支付(PayPal)：建单 -> OAuth2 建单 -> approve_url -> return 捕获 -> pending->paid -> 幂等 -> webhook 验签"
 else
   echo "SKIP 支付阶段(PayPal): 无 python3"
