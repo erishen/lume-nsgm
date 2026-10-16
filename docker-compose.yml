@@ -1,0 +1,68 @@
+# docker compose 一键构建并运行 lume-nsgm 生成的全栈应用。
+#
+# 用法（在 lume-nsgm/ 目录下）：
+#   docker compose up --build      # 首次构建（编译 lume-core + 重新生成 + 构建前端）
+#   docker compose up -d           # 后台运行
+#   docker compose down            # 停止并移除容器（数据卷 nsgm-data 保留）
+#
+# 构建上下文是 lume-nsgm 的父目录（work/lume），因为 Dockerfile 需要
+# 同时拿到 lume-core 源码与生成器源码。
+#
+# 访问（端口默认 18081，>10000；可用 DOCKER_PORT 环境变量覆盖宿主端口）：
+#   首页 / SSR 页面 ： http://localhost:18081/
+#   React SPA       ： http://localhost:18081/spa/
+#   REST API        ： http://localhost:18081/api/<module>
+#
+# 支付变体（带 pay 路由的镜像，二选一）：
+#   DOCKER_BUILDKIT=0 docker compose build --build-arg NSGM_CONFIG=example-pay.json
+#   DOCKER_BUILDKIT=0 docker compose build --build-arg NSGM_CONFIG=example-paypal.json
+#   DOCKER_BUILDKIT=0 docker compose up -d
+# 密钥等支付配置经 environment 从宿主 .env 注入（${PAY_KEY} / ${PAYPAL_KEY} 等），
+# 不进镜像层；env 名避开 SECRET/TOKEN 等词根（lume env() 会掩码这类名字）。
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: lume-nsgm/Dockerfile
+    image: lume-nsgm-app:latest
+    container_name: lume-nsgm-app
+    ports:
+      - "${DOCKER_PORT:-18081}:18081"
+    environment:
+      # 生成工程从 env 读取 server 配置；容器内固定 18081 / 0.0.0.0 / 单 worker
+      - PORT=18081
+      - HOST=0.0.0.0
+      - WORKERS=1
+      # 覆盖 SQLite 数据文件路径（容器内数据卷）
+      - NSGM_DB=/app/data/app.db
+      # ---- 支付接线（按 NSGM_CONFIG 构建的变体生效；值从宿主环境/.env 注入）----
+      # 微信变体（example-pay.json）：名字与 config.pay.secret_env 对应（默认 PAY_KEY）
+      - PAY_KEY=${PAY_KEY:-}
+      - PAY_MCHID=${PAY_MCHID:-}
+      - PAY_APPID=${PAY_APPID:-}
+      - PAY_SERIAL=${PAY_SERIAL:-}
+      # 回调地址：支付网关回调本容器的可达地址（生产填公网域名）
+      - PAY_NOTIFY_URL=${PAY_NOTIFY_URL:-http://127.0.0.1:18081/api/pay/notify}
+      # 网关基址（两变体共用此变量名）：默认微信域名；PayPal 变体在宿主设
+      # PAY_GATEWAY=https://api-m.sandbox.paypal.com（live 去掉 .sandbox）
+      - PAY_GATEWAY=${PAY_GATEWAY:-https://api.mch.weixin.qq.com}
+      # PayPal 变体（example-paypal.json）：client_secret 的 env 名（避开掩码词根）
+      - PAYPAL_KEY=${PAYPAL_KEY:-}
+      # PayPal approve 后跳回本容器的基址（生成工程拼 /api/pay/return）
+      - PAYPAL_RETURN_URL=${PAYPAL_RETURN_URL:-http://127.0.0.1:18081}
+    volumes:
+      - nsgm-data:/app/data
+    restart: unless-stopped
+    # 探针：任何构建配置都有首页路由（CRUD 演示探 /api/user 亦可，但支付变体没有
+    # user 模块，故统一探 /）。curl 在运行时镜像内（已装 curl）。
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:$$PORT/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  nsgm-data:
+    driver: local
