@@ -181,6 +181,21 @@ export func fmt_cents(cents: int): string {
 // 模块级状态随生成后的单进程生命周期持续；过期阈值取保守的 30000s。
 let PAYPAL_TOK_CACHE = { "token": "", "exp": 0 };
 
+// 出站 POST 带传输层重试：国内链路到 PayPal 沙箱偶发 TLS EOF / 响应超时
+// （当日实测一次即自愈，但收银台/捕获是用户可见路径，不能把恢复成本转嫁给
+// 用户手动重试）。http_post 的 ok=false 只表示传输失败（connect/TLS/超时），
+// HTTP 4xx/5xx 仍 ok=true——按 ok 重试不会重放已被服务端拒绝的请求。
+// core 无 sleep 内建，立即重试（单次超时本身即等待，见 opts.timeout）。
+func pp_post(url: string, opts) {
+  let r = http_post(url, opts);
+  let n = 0;
+  while (get(r, "ok", false) != true && n < 2) {
+    r = http_post(url, opts);
+    n = n + 1;
+  }
+  return r;
+}
+
 // 取 access_token：命中未过期缓存直接返回，否则 OAuth2 握手。
 // cfg = { gw, client_id, client_secret }；返回 { ok, token, err }
 export func paypal_token(cfg) {
@@ -188,7 +203,7 @@ export func paypal_token(cfg) {
     return { "ok": true, "token": PAYPAL_TOK_CACHE.token, "err": "" };
   }
   let url = str(get(cfg, "gw", "")) + "/v1/oauth2/token";
-  let r = http_post(url, {
+  let r = pp_post(url, {
     "headers": {
       "Authorization": paypal_basic_auth(str(get(cfg, "client_id", "")),
                                           str(get(cfg, "client_secret", ""))),
@@ -197,7 +212,7 @@ export func paypal_token(cfg) {
     },
     "body": "grant_type=client_credentials",
     "allow_private": true,
-    "timeout": 10
+    "timeout": 30
   });
   if (get(r, "ok", false) != true) {
     return { "ok": false, "token": "", "err": str(get(r, "err", "paypal token http fail")) };
@@ -218,7 +233,9 @@ export func paypal_token(cfg) {
     return { "ok": false, "token": "", "err": "paypal token missing in response" };
   }
   PAYPAL_TOK_CACHE.token = tok;
-  PAYPAL_TOK_CACHE.exp = now() + 30000;
+  // now() 是秒；PayPal token 寿命 3600s，留 600s 余量（原 30000 已超寿命，
+  // 会在 1h 后继续用过期的 token 打 401）。
+  PAYPAL_TOK_CACHE.exp = now() + 3000;
   return { "ok": true, "token": tok, "err": "" };
 }
 
@@ -244,7 +261,7 @@ export func paypal_create(cfg, token: string, order_no: string, cents: int, desc
       "shipping_preference": "NO_SHIPPING"
     }
   });
-  let r = http_post(url, {
+  let r = pp_post(url, {
     "headers": {
       "Authorization": "Bearer " + token,
       "Content-Type": "application/json",
@@ -252,7 +269,7 @@ export func paypal_create(cfg, token: string, order_no: string, cents: int, desc
     },
     "body": body,
     "allow_private": true,
-    "timeout": 10
+    "timeout": 30
   });
   let status = int(get(r, "status", 0));
   if (get(r, "ok", false) != true || status < 200 || status >= 300) {
@@ -286,18 +303,24 @@ export func paypal_create(cfg, token: string, order_no: string, cents: int, desc
 // 返回 { ok, status, capture_id, err }
 export func paypal_capture(cfg, token: string, paypal_order_id: string) {
   let url = str(get(cfg, "gw", "")) + "/v2/checkout/orders/" + paypal_order_id + "/capture";
-  let r = http_post(url, {
+  let r = pp_post(url, {
     "headers": {
       "Authorization": "Bearer " + token,
       "Content-Type": "application/json"
     },
     "body": "{}",
     "allow_private": true,
-    "timeout": 10
+    "timeout": 30
   });
   let status = int(get(r, "status", 0));
   if (get(r, "ok", false) != true || status < 200 || status >= 300) {
     let rbody = str(get(r, "body", ""));
+    // 重复捕获对账：PayPal 对已 CAPTURED 的单再 capture 回 422
+    // ORDER_ALREADY_CAPTURED——典型场景是上次捕获其实已成功、只是响应超时
+    // （当日实测：10s 超时后用户手动重试）。按成功处理，避免重复扣款/卡单。
+    if (status == 422 && contains(rbody, "ORDER_ALREADY_CAPTURED")) {
+      return { "ok": true, "status": "COMPLETED", "capture_id": "", "err": "" };
+    }
     return { "ok": false, "status": "", "capture_id": "",
              "err": str(get(r, "err", "")) + (rbody != "" ? " body=" + rbody : "") };
   }
