@@ -109,11 +109,14 @@ RUN mkdir -p /src/gen/www/spa \
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS runtime
 
-# 运行时仅需 SQLite / crypt / openssl 的共享库（构建期已动态链入，运行期要 .so）
+# 运行时仅需 SQLite / crypt / openssl 的共享库（构建期已动态链入，运行期要 .so）；
+# ca-certificates 提供根证书，否则出站 https 会因 SSL_CTX_set_default_verify_paths
+# 找不到 CA 而 TLS handshake failed。
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libsqlite3-0 \
         libcrypt1 \
         libssl3 \
+        ca-certificates \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
