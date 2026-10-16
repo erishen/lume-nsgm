@@ -85,6 +85,9 @@ export func gen_ui(out: string, mods, shop): int {
 //   PAY_CFG（密钥走 env）+ post /api/pay/create + post <notify_path> 两条路由。
 // 表名/列名/notify_path 均已过 validate.lume 白名单（标识符/路径形状校验），
 // 可安全拼进生成的 SQL 与路由字符串；商户标识限令牌字符集（见 validate_pay）。
+// 微信：gw/appid/mchid/serial 默认取配置，可分别被 PAY_GATEWAY/PAY_APPID/
+// PAY_MCHID/PAY_SERIAL env 覆盖（compose 同名单注入）；密钥走 secret_env。
+// PayPal：client_id 默认取配置，可被 PAYPAL_CLIENT_ID env 覆盖；secret 走 secret_env。
 func gen_pay_block(pay): string {
   let provider = str(get(pay, "provider", "wechat"));
   if (provider == "paypal") { return gen_paypal_block(pay); }
@@ -111,11 +114,14 @@ func gen_pay_block(pay): string {
     + "let PAY_SECRET_RAW = env(\"" + secret_env + "\");\n"
     + "let PAY_NOTIFY_RAW = env(\"PAY_NOTIFY_URL\");\n"
     + "let PAY_GATEWAY_RAW = env(\"PAY_GATEWAY\");\n"
+    + "let PAY_APPID_RAW = env(\"PAY_APPID\");\n"
+    + "let PAY_MCHID_RAW = env(\"PAY_MCHID\");\n"
+    + "let PAY_SERIAL_RAW = env(\"PAY_SERIAL\");\n"
     + "let PAY_CFG = {\n"
     + "  \"gw\": (PAY_GATEWAY_RAW != null && PAY_GATEWAY_RAW != \"\" ? str(PAY_GATEWAY_RAW) : \"" + gw + "\"),\n"
-    + "  \"appid\": \"" + appid + "\",\n"
-    + "  \"mchid\": \"" + mchid + "\",\n"
-    + "  \"serial\": \"" + serial + "\",\n"
+    + "  \"appid\": (PAY_APPID_RAW != null && PAY_APPID_RAW != \"\" ? str(PAY_APPID_RAW) : \"" + appid + "\"),\n"
+    + "  \"mchid\": (PAY_MCHID_RAW != null && PAY_MCHID_RAW != \"\" ? str(PAY_MCHID_RAW) : \"" + mchid + "\"),\n"
+    + "  \"serial\": (PAY_SERIAL_RAW != null && PAY_SERIAL_RAW != \"\" ? str(PAY_SERIAL_RAW) : \"" + serial + "\"),\n"
     + "  \"secret\": (PAY_SECRET_RAW != null ? str(PAY_SECRET_RAW) : \"\")\n"
     + "};\n"
     + "let PAY_NOTIFY_URL = (PAY_NOTIFY_RAW != null && PAY_NOTIFY_RAW != \"\") ? str(PAY_NOTIFY_RAW) : \"" + dflt_notify + "\";\n\n"
@@ -187,7 +193,8 @@ func gen_paypal_block(pay): string {
     + "// 与真实 PayPal 的差距：webhook 验签为 HMAC 简化版（真实含 crc32(body)，\n"
     + "// 需 core 补 crc32 内建或外挂 sidecar）；返回/回调走 query_params（req 无 headers\n"
     + "// 暴露）。详见 README「支付」节。\n"
-    + "let PAYPAL_CLIENT_ID = \"" + client_id + "\";\n"
+    + "let PAYPAL_CLIENT_ID_RAW = env(\"PAYPAL_CLIENT_ID\");\n"
+    + "let PAYPAL_CLIENT_ID = (PAYPAL_CLIENT_ID_RAW != null && PAYPAL_CLIENT_ID_RAW != \"\" ? str(PAYPAL_CLIENT_ID_RAW) : \"" + client_id + "\");\n"
     + "let PAYPAL_CLIENT_SECRET_RAW = env(\"" + secret_env + "\");\n"
     + "let PAYPAL_GATEWAY_RAW = env(\"PAY_GATEWAY\");\n"
     + "let PAYPAL_RETURN_RAW = env(\"PAYPAL_RETURN_URL\");\n"
