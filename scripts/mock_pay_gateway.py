@@ -8,6 +8,8 @@
   POST /v3/pay/native    下单：验 Authorization 头签名，返回 code_url/prepay_id
   POST /mock/notify      代网关投递回调：对业务报文签名后 POST 到应用的
                          notify_url（签名材料随 body，沙箱约定）
+  POST /v3/refund/domestic/refunds
+                         申请退款：验签名；out_refund_no 幂等（同号重发返回原结果）
 
 PayPal Express Checkout（provider: paypal）：
   POST /v1/oauth2/token              OAuth2 client_credentials：验 HTTP Basic
@@ -15,6 +17,9 @@ PayPal Express Checkout（provider: paypal）：
   POST /v2/checkout/orders          建单：返回 id + links[].rel=approve（指向本 mock
                                      收银台 /mock/paypal/approve?token=...）
   POST /v2/checkout/orders/{id}/capture  捕获：返回 COMPLETED + capture id
+  GET  /v2/checkout/orders/{id}     查单：返回订单详情（含 captures，退款反查兜底用）
+  POST /v2/payments/captures/{id}/refund  退款：重复退同一捕获回 422
+                                     （body 含 ALREADY_REFUNDED，应用侧按成功对账）
   GET  /mock/paypal/approve?token=..  模拟 PayPal 收银台 approve 后 302 跳回
                                      return_url?token=..（return_url 建单时由应用传入）
 
@@ -46,6 +51,8 @@ PP_CLIENT_ID = os.environ.get("MOCK_PAYPAL_CLIENT_ID", "AUmock_client_id_sandbox
 PP_SECRET = os.environ.get("MOCK_PAYPAL_CLIENT_SECRET", "e2e-mock-key").encode()
 PP_ISSUED_TOKEN = [None]   # 最近下发的 access_token（捕获时校验 Bearer）
 PP_ORDERS = {}             # order_id -> return_url（建单时由应用传入）
+PP_CAPTURES = {}           # capture_id -> {"order_id": .., "amount": .., "refunded": bool}
+PP_REFUNDS = {}            # refund_id -> capture_id（已退记录）
 
 # 投递回调走本机回环，显式禁代理（宿主/沙箱可能设了 http_proxy）
 NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -105,6 +112,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True})
         elif self.path.startswith("/mock/paypal/approve"):
             self._approve()
+        elif self.path.startswith("/v2/checkout/orders/"):
+            self._pp_get_order(self.path[len("/v2/checkout/orders/"):])
         else:
             self._json(404, {"code": "NOT_FOUND"})
 
@@ -116,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
             self._native(raw)
         elif self.path == "/mock/notify":
             self._notify(raw)
+        elif self.path == "/v3/refund/domestic/refunds":
+            self._wx_refund(raw)
         elif self.path == "/v1/oauth2/token":
             self._oauth(raw)
         elif self.path == "/v2/checkout/orders":
@@ -123,6 +134,9 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/v2/checkout/orders/") and self.path.endswith("/capture"):
             oid = self.path[len("/v2/checkout/orders/"):-len("/capture")]
             self._capture(raw, oid)
+        elif self.path.startswith("/v2/payments/captures/") and self.path.endswith("/refund"):
+            cid = self.path[len("/v2/payments/captures/"):-len("/refund")]
+            self._pp_refund(raw, cid)
         else:
             self._json(404, {"code": "NOT_FOUND"})
 
@@ -157,6 +171,44 @@ class Handler(BaseHTTPRequestHandler):
             "code_url": f"weixin://wxpay/bizpayurl?pr=MOCK{order_no}",
             "prepay_id": f"MOCKPRE{order_no}",
         })
+
+    def _wx_refund(self, raw: bytes):
+        """申请退款：验 Authorization 头签名（与 _native 同口径），out_refund_no 幂等。"""
+        auth = parse_auth(self.headers.get("Authorization", ""))
+        if auth is None:
+            self._json(401, {"code": "UNAUTHORIZED", "message": "bad authorization scheme"})
+            return
+        expect = sign("POST", "/v3/refund/domestic/refunds", auth.get("timestamp", ""),
+                      auth.get("nonce_str", ""), raw.decode())
+        if not hmac.compare_digest(expect, auth.get("signature", "")):
+            self._json(401, {"code": "UNAUTHORIZED", "message": "signature mismatch"})
+            return
+        try:
+            body = json.loads(raw.decode())
+        except Exception:
+            self._json(400, {"code": "PARAM_ERROR", "message": "invalid json"})
+            return
+        order_no = body.get("out_trade_no", "")
+        refund_no = body.get("out_refund_no", "")
+        amount = (body.get("amount") or {}).get("refund", 0)
+        if not order_no or not refund_no:
+            self._json(400, {"code": "PARAM_ERROR", "message": "missing out_trade_no/out_refund_no"})
+            return
+        rec = ORDERS.setdefault(order_no, {"amount": None, "notify_url": ""})
+        # out_refund_no 幂等：同号重发返回原退款结果（真实微信同语义）
+        prev = (rec.get("refunds") or {}).get(refund_no)
+        if prev is not None:
+            self._json(200, prev)
+            return
+        rid = f"MOCKRF{abs(hash(refund_no)) % 100000:05d}"
+        out = {
+            "refund_id": rid,
+            "out_refund_no": refund_no,
+            "status": "SUCCESS",
+            "amount": {"refund": int(amount), "currency": "CNY"},
+        }
+        rec.setdefault("refunds", {})[refund_no] = out
+        self._json(200, out)
 
     def _notify(self, raw: bytes):
         """代网关向应用投递一次签名回调。body: {notify_url, order_no, amount_cents}"""
@@ -255,12 +307,61 @@ class Handler(BaseHTTPRequestHandler):
         if oid not in PP_ORDERS:
             self._json(404, {"error": "order_not_found"})
             return
+        cid = "MOCK-CAPTURE-" + oid[-6:]
+        PP_CAPTURES.setdefault(cid, {"order_id": oid, "refunded": False})
         self._json(201, {
             "id": oid,
             "status": "COMPLETED",
             "purchase_units": [{"payments": {"captures": [
-                {"id": "MOCK-CAPTURE-" + oid[-6:], "status": "COMPLETED"}
+                {"id": cid, "status": "COMPLETED"}
             ]}}],
+        })
+
+    def _pp_get_order(self, oid: str):
+        """查单：返回 captures（应用侧退款反查 capture_id 的兜底路径）。"""
+        if not self._pp_bearer_ok():
+            self._json(401, {"error": "invalid_token"})
+            return
+        if oid not in PP_ORDERS:
+            self._json(404, {"error": "order_not_found"})
+            return
+        caps = [{"id": cid, "status": "REFUNDED" if c["refunded"] else "COMPLETED"}
+                for cid, c in PP_CAPTURES.items() if c["order_id"] == oid]
+        self._json(200, {
+            "id": oid,
+            "status": "COMPLETED" if caps else "CREATED",
+            "purchase_units": [{"payments": {"captures": caps}}],
+        })
+
+    def _pp_refund(self, raw: bytes, cid: str):
+        """退款：POST /v2/payments/captures/{capture_id}/refund。
+        重复退同一捕获回 422（body 含 ALREADY_REFUNDED——应用侧按成功对账）。"""
+        if not self._pp_bearer_ok():
+            self._json(401, {"error": "invalid_token"})
+            return
+        cap = PP_CAPTURES.get(cid)
+        if cap is None:
+            self._json(404, {"error": "resource_not_found"})
+            return
+        if cap["refunded"]:
+            self._json(422, {
+                "name": "UNPROCESSABLE_ENTITY",
+                "details": [{"issue": "ALREADY_REFUNDED", "description": "Capture already refunded."}],
+            })
+            return
+        try:
+            body = json.loads(raw.decode() or "{}")
+        except Exception:
+            body = {}
+        amt = body.get("amount") or {}
+        cap["refunded"] = True
+        rid = "MOCK-REFUND-" + secrets.token_hex(6)
+        PP_REFUNDS[rid] = cid
+        self._json(201, {
+            "id": rid,
+            "status": "COMPLETED",
+            "amount": {"value": str(amt.get("value", "")), "currency_code": str(amt.get("currency_code", "USD"))},
+            "capture_id": cid,
         })
 
     def _approve(self):

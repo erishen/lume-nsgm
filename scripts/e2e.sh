@@ -277,6 +277,30 @@ PY
     || fail "幂等：重买新单应 pending"
   echo "ok   幂等（ik）：首单 pending -> 同 ik 复用 -> 支付 -> 同 ik 重买开新单（SHOP-<ik>-r<ts>）"
   echo "ok   店面：商品列表 -> 购买下单 -> code_url 收银台 -> mock 支付 -> paid 落库"
+
+  # ---- 退款（微信）：确认页 -> mock 网关受理 -> refunded 落库 -> 重复退幂等 ----
+  # 场景：/shop/refund/:ono 确认页（?confirm=1 执行）。仅 paid 可退；pending 单
+  # （幂等重买的新单）与未知订单被拒；退成功后结果页同步展示「已退款」。
+  echo "==> 退款阶段（微信）：确认页 -> 退款 -> 已退款 -> 重复退幂等 ..."
+  RF_HTML="$(curl -s --noproxy '*' "$PB/shop/refund/$SONO")"
+  echo "$RF_HTML" | grep -q '申请退款' || fail "微信退款确认页应展示申请退款: $(echo "$RF_HTML" | head -8)"
+  echo "$RF_HTML" | grep -q '微信支付' || fail "微信退款确认页应带渠道徽标"
+  echo "$RF_HTML" | grep -q 'confirm=1' || fail "微信退款确认页应带确认链接"
+  # pending 单不可退（幂等段重买的新单此时仍 pending）
+  curl -s --noproxy '*' "$PB/shop/refund/$REBUY?confirm=1" | grep -q '仅已支付订单可退款' \
+    || fail "pending 订单应拒退"
+  # 未知订单
+  curl -s --noproxy '*' "$PB/shop/refund/NOPE-1?confirm=1" | grep -q '订单不存在' \
+    || fail "未知订单退款应提示不存在"
+  # 确认退款：应用 HMAC 签名调 mock 网关 /v3/refund/domestic/refunds
+  curl -s --noproxy '*' -o /dev/null "$PB/shop/refund/$SONO?confirm=1" || fail "微信退款请求失败"
+  curl -s --noproxy '*' "$PB/api/order?q=$SONO" | grep -q '"status":"refunded"' \
+    || fail "退款后订单应落库 refunded"
+  curl -s --noproxy '*' "$PB/shop/result/$SONO" | grep -q '已退款' || fail "结果页应展示已退款"
+  # 重复退（幂等）：本地状态守卫，仍展示已退款
+  curl -s --noproxy '*' "$PB/shop/refund/$SONO?confirm=1" | grep -q '已退款' \
+    || fail "重复退应幂等展示已退款"
+  echo "ok   退款（微信）：确认页 -> mock 网关受理 -> refunded 落库 -> 重复退幂等 -> pending 拒退"
 else
   echo "SKIP 支付阶段: 无 python3"
 fi
@@ -380,9 +404,51 @@ PY
   curl -s --noproxy '*' "$PPB/shop/result/NOPE-1" | grep -q 'PayPal' || fail "PayPal 订单不存在页应明示 PayPal"
   echo "ok   店面(PayPal)：列表明示 PayPal + \$ 计价 -> 收银台 approve_url -> 结果页徽标"
   echo "ok   支付(PayPal)：建单 -> OAuth2 建单 -> approve_url -> return 捕获 -> pending->paid -> 幂等 -> webhook 验签"
+
+  # ---- 退款（PayPal）：确认页 -> capture refund -> refunded 落库 -> 重复退幂等 ----
+  # 场景：$ONO 已捕获（capture_id 由 return 处理器回填）；退款走
+  # POST /v2/payments/captures/{capture_id}/refund。pending 单（店面新单未 approve）
+  # 与未知订单被拒；mock 侧对同一捕获重复退回 422 ALREADY_REFUNDED（应用侧
+  # paypal_refund 按成功对账，本地状态守卫为主）。
+  echo "==> 退款阶段（PayPal）：确认页 -> 退款 -> 已退款 -> 重复退幂等 ..."
+  PP_RF_HTML="$(curl -s --noproxy '*' "$PPB/shop/refund/$ONO")"
+  echo "$PP_RF_HTML" | grep -q '申请退款' || fail "PayPal 退款确认页应展示申请退款: $(echo "$PP_RF_HTML" | head -8)"
+  echo "$PP_RF_HTML" | grep -q 'PayPal' || fail "PayPal 退款确认页应带渠道徽标"
+  echo "$PP_RF_HTML" | grep -q '\$149.00' || fail "PayPal 退款确认页应展示订单金额"
+  # pending 单不可退（店面新单未 approve）
+  curl -s --noproxy '*' "$PPB/shop/refund/$PP_SONO?confirm=1" | grep -q '仅已支付订单可退款' \
+    || fail "pending 订单应拒退"
+  # 未知订单
+  curl -s --noproxy '*' "$PPB/shop/refund/NOPE-1?confirm=1" | grep -q '订单不存在' \
+    || fail "未知订单退款应提示不存在"
+  # 确认退款（mock 受理，回填的 capture_id 作为退款对象）
+  curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/$ONO?confirm=1" || fail "PayPal 退款请求失败"
+  curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"status":"refunded"' \
+    || fail "退款后订单应落库 refunded"
+  curl -s --noproxy '*' "$PPB/shop/result/$ONO" | grep -q '已退款' || fail "结果页应展示已退款"
+  # 重复退（幂等）：本地状态守卫，仍展示已退款
+  curl -s --noproxy '*' "$PPB/shop/refund/$ONO?confirm=1" | grep -q '已退款' \
+    || fail "重复退应幂等展示已退款"
+  # mock 侧直探：查单兜底（GET order 返回 captures）+ 同一捕获重复退 422
+  # （放在所有应用侧调用之后：直取 token 会顶掉 mock 的 PP_ISSUED_TOKEN）
+  PP_PPID="$(curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -o '"paypal_order_id":"[^"]*"' | head -1 | sed 's/"paypal_order_id":"//;s/"$//')"
+  PP_CAP="$(curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -o '"capture_id":"[^"]*"' | head -1 | sed 's/"capture_id":"//;s/"$//')"
+  [ -n "$PP_PPID" ] || fail "return 处理器应回填 paypal_order_id"
+  [ -n "$PP_CAP" ] || fail "return 处理器应回填 capture_id"
+  PP_TOK="$(curl -s --noproxy '*' -u "$PP_CLIENT_ID:$PP_SECRET" -d 'grant_type=client_credentials' \
+    "$PMB/v1/oauth2/token" | grep -o '"access_token":"[^"]*"' | head -1 | sed 's/"access_token":"//;s/"$//')"
+  [ -n "$PP_TOK" ] || fail "PayPal mock 应下发 access_token"
+  curl -s --noproxy '*' -H "Authorization: Bearer $PP_TOK" "$PMB/v2/checkout/orders/$PP_PPID" \
+    | grep -q "$PP_CAP" || fail "mock 查单应返回 capture_id（退款反查兜底）"
+  DUP_CODE="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' -X POST \
+    -H "Authorization: Bearer $PP_TOK" -H 'Content-Type: application/json' \
+    -d '{"amount":{"value":"149.00","currency_code":"USD"}}' \
+    "$PMB/v2/payments/captures/$PP_CAP/refund")"
+  [ "$DUP_CODE" = "422" ] || fail "mock 对已退捕获重复退应回 422（got $DUP_CODE）"
+  echo "ok   退款（PayPal）：确认页 -> capture refund -> refunded 落库 -> 重复退幂等 -> 查单兜底 -> mock 422 对账"
 else
   echo "SKIP 支付阶段(PayPal): 无 python3"
 fi
 
-echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / 微信支付全链路 / PayPal 全链路)"
+echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / 微信支付全链路 / PayPal 全链路 / 退款全链路)"
 exit 0
