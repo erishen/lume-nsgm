@@ -53,7 +53,7 @@ export func nonce_str(order_no: string): string {
   return order_no + "-" + str(now());
 }
 
-// Native 下单：POST {gw}/v3/pay/native，返回支付码 URL（code_url）。
+// Native 下单：POST {gw}/v3/pay/transactions/native，返回支付码 URL（code_url）。
 // cfg = { "gw", "appid", "mchid", "serial", "secret" }；
 // 返回 { ok, status, err, code_url, prepay_id }——网关 4xx/5xx 或网络错误
 // 均 ok=false（调用方按 502 处理，勿把网关错误当支付成功）。
@@ -63,7 +63,7 @@ export func create_native(cfg, order_no: string, cents: int, desc: string, notif
   let gw = str(get(cfg, "gw", ""));
   let mchid = str(get(cfg, "mchid", ""));
   let secret = str(get(cfg, "secret", ""));
-  let path = "/v3/pay/native";
+  let path = "/v3/pay/transactions/native";
   let ts = now();
   let nonce = nonce_str(order_no);
   let body = stringify({

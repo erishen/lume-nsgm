@@ -193,7 +193,7 @@ PY
     fail "pay/create 未返回预期 code_url: $CREATE_RESP"
   fi
   # 3) 网关侧负例：坏 Authorization 签名必须 401（证明网关真在验签）
-  [ "$(code -X POST "$MB/v3/pay/native" \
+  [ "$(code -X POST "$MB/v3/pay/transactions/native" \
        -H 'Authorization: WECHATPAY2-SHA256-HMAC mchid="x",serial_no="y",nonce_str="n",timestamp="1",signature="deadbeef"' \
        -H 'Content-Type: application/json' -d '{}')" = "401" ] \
     || fail "mock 网关应拒坏签名(401)"

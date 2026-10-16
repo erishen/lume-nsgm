@@ -112,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n) if n else b""
 
-        if self.path == "/v3/pay/native":
+        if self.path == "/v3/pay/transactions/native":
             self._native(raw)
         elif self.path == "/mock/notify":
             self._notify(raw)
@@ -133,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
         if auth is None:
             self._json(401, {"code": "UNAUTHORIZED", "message": "bad authorization scheme"})
             return
-        expect = sign("POST", "/v3/pay/native", auth.get("timestamp", ""),
+        expect = sign("POST", "/v3/pay/transactions/native", auth.get("timestamp", ""),
                       auth.get("nonce_str", ""), raw.decode())
         if not hmac.compare_digest(expect, auth.get("signature", "")):
             if os.environ.get("MOCK_PAY_DEBUG"):
