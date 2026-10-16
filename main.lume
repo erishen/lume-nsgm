@@ -37,7 +37,7 @@ func cmd_create(args): int {
     { "name": "create_date", "type": "timestamp", "required": 0, "primary": 0, "auto": 0, "system": 1, "showInList": 1, "showInForm": 0, "searchable": 0, "comment": "创建时间" }
   ];
   gen_one(ctrl, fs, len(fs), db, out);
-  base.base_project(out, [{ "name": ctrl, "fields": fs }], null);
+  base.base_project(out, [{ "name": ctrl, "fields": fs }], null, null);
   print("runnable project scaffolded at " + out + " (see README.run.md)");
   return 0;
 }
@@ -73,7 +73,7 @@ func cmd_init(args): int {
     }
   }
   gen_one(ctrl, fs, len(fs), db, out);
-  base.base_project(out, [{ "name": ctrl, "fields": fs }], null);
+  base.base_project(out, [{ "name": ctrl, "fields": fs }], null, null);
   print("init done: " + ctrl + " (" + str(len(fs)) + " fields)");
   return 0;
 }
@@ -108,7 +108,8 @@ func cmd_config(path: string): int {
   let out = get(cfg, "out", "./gen");
   let mods = get(cfg, "modules", []);
   let pay = get(cfg, "pay", null);
-  base.base_project(out, mods, pay);
+  let shop = get(cfg, "shop", null);
+  base.base_project(out, mods, pay, shop);
   let i = 0;
   while (i < len(mods)) {
     let mod = mods[i];

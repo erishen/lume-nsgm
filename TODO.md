@@ -146,3 +146,17 @@ P2（生成器扩展） ───────┘
 ```
 
 P1 与 P2 可并行；P3 的 P3-1/2/3（core 内建）不依赖 P1/P2，可随时插队。
+
+### P3-9 店面（shop 段）：面向顾客的电商前端（✅ 2026-10-16）
+- `config.shop`（与 pay 同配）：product_module / order_module / name_field / price_field。
+- 生成路由：`get /shop`（商品卡片，空表播种 3 演示商品）→ `get /shop/buy/:id`
+  （写订单 pending，SHOP-<ts>-<pid>）→ `get /shop/pay/:ono`（微信 code_url /
+  PayPal approve_url）→ `get /shop/mock-pay/:ono`（仅微信，mock 代投递签名回调，
+  demo 专用）→ `get /shop/result/:ono`（结果页）。导航与首页多「商城」入口。
+- `validate_shop`：product_module 必须已定义、name/price 字段必须真实存在。
+- 店面与支付共享订单表与回调链路（验签/幂等/落库复用 gen_pay_block 产物）。
+- 验收：e2e 店面阶段（列表/播种/购买/收银台/模拟支付/paid 落库）+ Docker 容器
+  内全链路复验；t7 增 validate_shop 用例（5 条）。
+- 🔴 教训：`fn` 已成 lume 保留字（core aa57a68），validate.lume `let fn` 改名 fname；
+  生成器写「产物级模板 + replace 注入占位符」暴露 core `native_split` 未根住 list
+  的 heap-use-after-free（`200ed4e` 修复）——占位符 replace 必须在全部拼接完成后。

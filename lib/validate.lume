@@ -120,18 +120,18 @@ export func validate_config(cfg) {
         let f = get(fs, j, null);
         if (f != null) {
           let fat = at + ".fields[" + str(j) + "]";
-          let fn = str(get(f, "name", ""));
+          let fname = str(get(f, "name", ""));
           let ty = str(get(f, "type", ""));
-          if (fn == "") {
+          if (fname == "") {
             push(errs, fat + ": missing required \"name\"");
           } else {
-            if (valid_ident(fn) == 0) {
-              push(errs, fat + ": \"name\" must match [a-z][a-z0-9_]* (got \"" + fn + "\")");
+            if (valid_ident(fname) == 0) {
+              push(errs, fat + ": \"name\" must match [a-z][a-z0-9_]* (got \"" + fname + "\")");
             }
-            if (contains(seen, "," + fn + ",")) {
-              push(errs, fat + ": duplicate field name \"" + fn + "\"");
+            if (contains(seen, "," + fname + ",")) {
+              push(errs, fat + ": duplicate field name \"" + fname + "\"");
             } else {
-              seen = seen + fn + ",";
+              seen = seen + fname + ",";
             }
           }
           if (ty == "") {
@@ -161,6 +161,16 @@ export func validate_config(cfg) {
     while (p < len(perrs)) {
       push(errs, get(perrs, p, ""));
       p = p + 1;
+    }
+  }
+  // shop 段（可选）：店面接线校验
+  let shop = get(cfg, "shop", null);
+  if (shop != null) {
+    let serrs = validate_shop(shop, mods);
+    let s2 = 0;
+    while (s2 < len(serrs)) {
+      push(errs, get(serrs, s2, ""));
+      s2 = s2 + 1;
     }
   }
   return errs;
@@ -355,6 +365,48 @@ export func validate_pay_paypal(pay, mods) {
       }
     }
     i = i + 1;
+  }
+  return errs;
+}
+
+// shop 段校验（可选）：店面接线。product_module 必须存在，name_field/price_field
+// 必须是它的真实字段（生成的 SQL 与购买路由直接引用）；order_module 须与 pay 段的
+// 订单模块一致（店面下单写的就是支付接线的订单表）。
+export func validate_shop(shop, mods) {
+  let errs = [];
+  if (shop == null) { return errs; }
+  let pm = str(get(shop, "product_module", ""));
+  if (pm == "") {
+    push(errs, "shop: missing required \"product_module\"");
+    return errs;
+  }
+  let found = 0;
+  let i = 0;
+  while (i < len(mods)) {
+    let mod = get(mods, i, null);
+    if (mod != null && str(get(mod, "name", "")) == pm) {
+      found = 1;
+      let fs = get(mod, "fields", []);
+      let j = 0;
+      let seen = ",";
+      while (j < len(fs)) {
+        let f = get(fs, j, null);
+        if (f != null) { seen = seen + str(get(f, "name", "")) + ","; }
+        j = j + 1;
+      }
+      let nf = str(get(shop, "name_field", "name"));
+      let pf = str(get(shop, "price_field", "price_cents"));
+      if (!contains(seen, "," + nf + ",")) {
+        push(errs, "shop.name_field: \"" + nf + "\" is not a field of module \"" + pm + "\"");
+      }
+      if (!contains(seen, "," + pf + ",")) {
+        push(errs, "shop.price_field: \"" + pf + "\" is not a field of module \"" + pm + "\"");
+      }
+    }
+    i = i + 1;
+  }
+  if (found == 0) {
+    push(errs, "shop.product_module: \"" + pm + "\" is not a defined module");
   }
   return errs;
 }

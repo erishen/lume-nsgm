@@ -30,8 +30,8 @@ export func copy_base(out: string): int {
   return 0;
 }
 
-// 生成 lib/ui.lume：SSR 组件库，NAV 由模块清单注入
-export func gen_ui(out: string, mods): int {
+// 生成 lib/ui.lume：SSR 组件库，NAV 由模块清单注入（shop 非 null 时加商城入口）
+export func gen_ui(out: string, mods, shop): int {
   let nav_rows = "";
   let i = 0;
   while (i < len(mods)) {
@@ -42,6 +42,9 @@ export func gen_ui(out: string, mods): int {
       nav_rows = nav_rows + "  [\"" + name + "\", \"" + label + "\"],\n";
     }
     i = i + 1;
+  }
+  if (shop != null) {
+    nav_rows = nav_rows + "  [\"shop\", \"商城\"],\n";
   }
   let content = "// lib/ui.lume — SSR 组件库（lume-nsgm 生成：NAV 为模块清单）\n"
     + "let NAV = [\n" + nav_rows + "];\n\n"
@@ -252,10 +255,144 @@ func gen_paypal_block(pay): string {
   return b;
 }
 
+// 生成店面接线块（config.shop 存在且 pay 非 null 时注入 app.lume）：
+//   get /shop（商品列表，空表自动播种演示数据）+ get /shop/buy/:id（下单 pending）
+//   + get /shop/pay/:ono（收银台：微信 code_url / PayPal approve_url）
+//   + get /shop/mock-pay/:ono（仅微信：让 mock 网关代投递签名回调，demo 专用）
+//   + get /shop/result/:ono（支付结果）。
+// 依赖同一 app.lume 里支付接线块的模块级 PAY_CFG/PAY_NOTIFY_URL（微信）或
+// PAYPAL_CFG/PAYPAL_RETURN_BASE（PayPal），故 shop 必须与 pay 同时配置。
+// 生成店面接线块（config.shop 存在且 pay 非 null 时注入 app.lume）：
+//   get /shop（商品列表，空表自动播种演示数据）+ /shop/buy/:id（下单 pending）
+//   + /shop/pay/:ono（收银台：微信 code_url / PayPal approve_url）
+//   + /shop/mock-pay/:ono（仅微信：mock 网关代投递签名回调，demo 专用）
+//   + /shop/result/:ono（支付结果）。
+// 依赖同一 app.lume 里支付接线块的模块级 PAY_CFG/PAY_NOTIFY_URL（微信）或
+// PAYPAL_CFG/PAYPAL_RETURN_BASE（PayPal），故 shop 必须与 pay 同时配置。
+// 产物级模板写好后由 replace() 注入配置标识符（均过 validate 白名单），
+// 避免逐行手写双层转义（曾在此踩坑：get(p, \"name\") 多一层反斜杠）。
+export func gen_shop_block(shop, pay): string {
+  let provider = str(get(pay, "provider", "wechat"));
+  let pm = str(get(shop, "product_module", "product"));
+  let nf = str(get(shop, "name_field", "name"));
+  let pf = str(get(shop, "price_field", "price_cents"));
+  let om = str(get(pay, "order_module", ""));
+  let onf = str(get(pay, "order_no_field", "order_no"));
+  let amf = str(get(pay, "amount_field", "amount_cents"));
+  let stf = str(get(pay, "status_field", "status"));
+  let t = ""
+    + "// ---- 店面（lume-nsgm 生成：商品列表 -> 下单 -> 收银台 -> 结果页）----\n"
+    + "func shop_jump(path: string): string {\n"
+    + "  return ui.page(\"跳转\", \"shop\", \"<div class=\\\"form-wrap\\\"><p>正在跳转…</p></div>\\n<script>location.href = '\" + path + \"';</script>\\n\");\n"
+    + "}\n"
+    + "\n"
+    + "get \"/shop\", func(req) {\n"
+    + "  let prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" ORDER BY \\\"id\\\"\", []);\n"
+    + "  if (len(prows) == 0) {\n"
+    + "    // 演示种子：首次访问自动铺 3 个商品（可在后台 __PM__ 模块增删改）\n"
+    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"Lume 机械键盘\", 39900]);\n"
+    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"lume 主题卫衣\", 19900]);\n"
+    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"程序员马克杯\", 5900]);\n"
+    + "    prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" ORDER BY \\\"id\\\"\", []);\n"
+    + "  }\n"
+    + "  let body = \"<h1>商城</h1>\\n<p class=\\\"muted\\\">演示店面：点「购买」下单，收银台完成支付，回调自动落库。</p>\\n\";\n"
+    + "  let i = 0;\n"
+    + "  while (i < len(prows)) {\n"
+    + "    let p = prows[i];\n"
+    + "    body = body + \"<div class=\\\"card\\\"><h3>\" + ui.esc(str(get(p, \"__NF__\", \"\"))) + \"</h3>\\n\"\n"
+    + "      + \"<p class=\\\"price\\\">¥\" + pay.fmt_cents(int(get(p, \"__PF__\", 0))) + \"</p>\\n\"\n"
+    + "      + \"<p class=\\\"muted\\\">\" + ui.esc(str(get(p, \"detail\", \"\"))) + \"</p>\\n\"\n"
+    + "      + \"<a class=\\\"btn primary\\\" href=\\\"/shop/buy/\" + str(get(p, \"id\", 0)) + \"\\\">购买</a></div>\\n\";\n"
+    + "    i = i + 1;\n"
+    + "  }\n"
+    + "  return ui.page(\"商城\", \"shop\", body);\n"
+    + "};\n"
+    + "\n"
+    + "get \"/shop/buy/:id\", func(req) {\n"
+    + "  let pid = db.qs_int(req.params, \"id\", 0);\n"
+    + "  let prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" WHERE \\\"id\\\" = ?\", [pid]);\n"
+    + "  if (len(prows) == 0) { return ui.page(\"商城\", \"shop\", \"<div class=\\\"flash err\\\">商品不存在</div><p><a href=\\\"/shop\\\">返回商城</a></p>\"); }\n"
+    + "  let p = prows[0];\n"
+    + "  let ono = \"SHOP-\" + str(now()) + \"-\" + str(pid);\n"
+    + "  sql_write(db.dsn(), \"INSERT INTO \\\"__OM__\\\" (\\\"__ONF__\\\", \\\"__AMF__\\\", \\\"__STF__\\\") VALUES (?, ?, 'pending')\", [ono, int(get(p, \"__PF__\", 0))]);\n"
+    + "  return shop_jump(\"/shop/pay/\" + ono);\n"
+    + "};\n"
+    + "\n"
+    + "get \"/shop/pay/:ono\", func(req) {\n"
+    + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
+    + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
+    + "  if (len(orows) == 0) { return ui.page(\"支付\", \"shop\", \"<div class=\\\"flash err\\\">订单不存在</div><p><a href=\\\"/shop\\\">返回商城</a></p>\"); }\n"
+    + "  let o = orows[0];\n"
+    + "  if (str(get(o, \"__STF__\", \"\")) == \"paid\") { return shop_jump(\"/shop/result/\" + ono); }\n"
+    + "  let cents = int(get(o, \"__AMF__\", 0));\n"
+    ;
+  if (provider == "paypal") {
+    t = t + ""
+      + "  let tk = pay.paypal_token(PAYPAL_CFG);\n"
+      + "  if (get(tk, \"ok\", false) != true) {\n"
+      + "    return ui.page(\"支付\", \"shop\", \"<div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk, \"err\", \"\"))) + \"</div>\");\n"
+      + "  }\n"
+      + "  let return_url = PAYPAL_RETURN_BASE + \"/api/pay/return?order_no=\" + ono;\n"
+      + "  let cancel_url = PAYPAL_RETURN_BASE + \"/api/pay/cancel?order_no=\" + ono;\n"
+      + "  let r = pay.paypal_create(PAYPAL_CFG, str(get(tk, \"token\", \"\")), ono, cents, \"Shop order \" + ono, return_url, cancel_url);\n"
+      + "  if (get(r, \"ok\", false) != true) {\n"
+      + "    return ui.page(\"支付\", \"shop\", \"<div class=\\\"flash err\\\">支付网关错误：\" + ui.esc(str(get(r, \"err\", \"\"))) + \"</div><p><a href=\\\"/shop/pay/\" + ono + \"\\\">重试</a></p>\");\n"
+      + "  }\n"
+      + "  let body = \"<h1>收银台</h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> · 金额 <strong>$\" + pay.fmt_cents(cents) + \"</strong></p>\\n\"\n"
+      + "    + \"<p><a class=\\\"btn primary\\\" href=\\\"\" + ui.esc(str(get(r, \"approve_url\", \"\"))) + \"\\\">前往 PayPal 支付</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ono + \"\\\">查询支付结果</a></p>\\n\";\n"
+      + "  return ui.page(\"收银台\", \"shop\", body);\n"
+      ;
+  } else {
+    t = t + ""
+      + "  let r = pay.create_native(PAY_CFG, ono, cents, \"商城订单 \" + ono, PAY_NOTIFY_URL);\n"
+      + "  if (get(r, \"ok\", false) != true) {\n"
+      + "    return ui.page(\"支付\", \"shop\", \"<div class=\\\"flash err\\\">支付网关错误：\" + ui.esc(str(get(r, \"err\", \"\"))) + \"</div><p><a href=\\\"/shop/pay/\" + ono + \"\\\">重试</a></p>\");\n"
+      + "  }\n"
+      + "  let body = \"<h1>收银台</h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> · 金额 <strong>¥\" + pay.fmt_cents(cents) + \"</strong></p>\\n\"\n"
+      + "    + \"<p>微信扫码支付（mock）：</p><p><code>\" + ui.esc(str(get(r, \"code_url\", \"\"))) + \"</code></p>\\n\"\n"
+      + "    + \"<p><a class=\\\"btn primary\\\" href=\\\"/shop/mock-pay/\" + ono + \"\\\">模拟支付成功（demo）</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ono + \"\\\">查询支付结果</a></p>\\n\";\n"
+      + "  return ui.page(\"收银台\", \"shop\", body);\n"
+      + "};\n"
+      + "\n"
+      + "// demo 专用：让 mock 网关代投递签名回调（真实环境由微信服务器打 notify）\n"
+      + "get \"/shop/mock-pay/:ono\", func(req) {\n"
+      + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
+      + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
+      + "  if (len(orows) == 0) { return ui.page(\"支付\", \"shop\", \"<div class=\\\"flash err\\\">订单不存在</div>\"); }\n"
+      + "  let cents = int(get(orows[0], \"__AMF__\", 0));\n"
+      + "  let nb = stringify({ \"notify_url\": PAY_NOTIFY_URL, \"order_no\": ono, \"amount_cents\": cents });\n"
+      + "  http_post(str(get(PAY_CFG, \"gw\", \"\")) + \"/mock/notify\", { \"headers\": { \"Content-Type\": \"application/json\" }, \"body\": nb, \"allow_private\": true, \"timeout\": 10 });\n"
+      + "  return shop_jump(\"/shop/result/\" + ono);\n"
+      + "};\n"
+      ;
+  }
+  t = t + ""
+    + "get \"/shop/result/:ono\", func(req) {\n"
+    + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
+    + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
+    + "  if (len(orows) == 0) { return ui.page(\"支付结果\", \"shop\", \"<div class=\\\"flash err\\\">订单不存在</div><p><a href=\\\"/shop\\\">返回商城</a></p>\"); }\n"
+    + "  let st = str(get(orows[0], \"__STF__\", \"\"));\n"
+    + "  if (st == \"paid\") {\n"
+    + "    return ui.page(\"支付成功\", \"shop\", \"<h1>支付成功</h1><p>订单 <code>\" + ui.esc(ono) + \"</code> 已完成。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a></p>\");\n"
+    + "  }\n"
+    + "  return ui.page(\"等待支付\", \"shop\", \"<h1>等待支付</h1><p>订单 <code>\" + ui.esc(ono) + \"</code> 状态：\" + ui.esc(st) + \"。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop/pay/\" + ono + \"\\\">去支付</a></p>\");\n"
+    + "};\n"
+    ;
+  // 占位符统一在拼接完成后替换（分支/尾部模板同样带占位符）
+  t = replace(t, "__PM__", pm);
+  t = replace(t, "__NF__", nf);
+  t = replace(t, "__PF__", pf);
+  t = replace(t, "__OM__", om);
+  t = replace(t, "__ONF__", onf);
+  t = replace(t, "__AMF__", amf);
+  t = replace(t, "__STF__", stf);
+  return t;
+}
+
 // 生成 app.lume 入口：server 块 + 模块装配（import 即注册路由）+ 建表 + run()
 // 顺序对照 lume 仓 examples/demo.lume：server{} -> routes(经 import) -> run()
 // pay 为 config.pay（validate_pay 已过）或 null；非 null 时注入支付接线块。
-export func gen_app_entry(out: string, mods, pay): int {
+export func gen_app_entry(out: string, mods, pay, shop): int {
   let imports = "";
   let ddl_args = "";
   let i = 0;
@@ -287,6 +424,7 @@ export func gen_app_entry(out: string, mods, pay): int {
     + "\n// 首次启动自动建表（CREATE TABLE IF NOT EXISTS），并对已有表补齐新增列（迁移）\n"
     + "db.init([" + ddl_args + "]);\n\n"
     + (pay != null ? gen_pay_block(pay) + "\n" : "")
+    + (pay != null && shop != null ? gen_shop_block(shop, pay) + "\n" : "")
     + "// 首页导航\n"
     + "get \"/\", func(req) {\n"
     + "  let body = \"<h1>lume-nsgm 生成的项目</h1>\\n<ul>\\n\";\n";
@@ -299,7 +437,8 @@ export func gen_app_entry(out: string, mods, pay): int {
     }
     i = i + 1;
   }
-  content = content + "  body = body + \"</ul>\\n\";\n"
+  content = content + (pay != null && shop != null ? "  body = body + \"  <li><a href=/shop>商城（店面演示）</a></li>\\n\";\n" : "")
+    + "  body = body + \"</ul>\\n\";\n"
     + "  return ui.page(\"首页\", \"\", body);\n"
     + "};\n\n"
     + "run();\n";
@@ -309,7 +448,8 @@ export func gen_app_entry(out: string, mods, pay): int {
 
 // 串联：建目录 -> 复制静态基座 -> ui.lume -> app.lume -> web/ React 前端
 // pay 为 config.pay（或 null）；非 null 时 app.lume 注入支付接线（见 gen_pay_block）
-export func base_project(out: string, mods, pay): int {
+// shop 为 config.shop（或 null）；pay+shop 同时非 null 时注入店面（见 gen_shop_block）
+export func base_project(out: string, mods, pay, shop): int {
   mkdir(out);
   mkdir(out + "/lib");
   mkdir(out + "/modules");
@@ -318,8 +458,8 @@ export func base_project(out: string, mods, pay): int {
   mkdir(out + "/data");
 
   copy_base(out);
-  gen_ui(out, mods);
-  gen_app_entry(out, mods, pay);
+  gen_ui(out, mods, shop);
+  gen_app_entry(out, mods, pay, shop);
   rg.gen_web(out, mods);
   return 0;
 }

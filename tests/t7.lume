@@ -116,6 +116,11 @@ func main() {
       { "name": "order_no", "type": "varchar", "required": 1 },
       { "name": "amount_cents", "type": "integer", "required": 1 },
       { "name": "status", "type": "varchar" }
+    ] },
+    { "name": "product", "fields": [
+      { "name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1 },
+      { "name": "name", "type": "varchar", "required": 1 },
+      { "name": "price_cents", "type": "integer", "required": 1 }
     ] }
   ];
   let good_pay = {
@@ -275,6 +280,22 @@ func main() {
   };
   f = f + a.assert_contains(stringify(v.validate_pay(bad_pwh, mods)), ".webhook_path: must be a path",
     "t7: paypal webhook_path must start with /");
+
+  // ---------- B3) validate_shop ----------
+  let good_shop = { "product_module": "product", "order_module": "order", "name_field": "name", "price_field": "price_cents" };
+  f = f + a.assert_true(len(v.validate_shop(good_shop, mods)) == 0,
+    "t7: valid shop section must pass");
+  f = f + a.assert_true(len(v.validate_shop(null, mods)) == 0,
+    "t7: null shop must pass (optional section)");
+  let no_pm = { "order_module": "order" };
+  f = f + a.assert_true(any_contains(v.validate_shop(no_pm, mods), "missing required \"product_module\""),
+    "t7: shop without product_module must be reported");
+  let bad_pm = { "product_module": "products", "order_module": "order" };
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_pm, mods), "is not a defined module"),
+    "t7: shop unknown product_module must be reported");
+  let bad_pf = { "product_module": "product", "order_module": "order", "price_field": "price" };
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_pf, mods), "price_field: \"price\" is not a field"),
+    "t7: shop unknown price_field must be reported");
 
   // ---------- C) 字段级 default ----------
 

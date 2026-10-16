@@ -407,6 +407,34 @@ PayPal 专属边界（详见 TODO.md P3-8）：
 `make test-e2e` 固化 PayPal 沙箱全链路——建单 → approve_url → return 捕获 →
 `status:"paid"` → 重复 return 幂等。
 
+### 店面（shop 段，面向顾客的电商前端）
+
+pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay` 同时配置）后，生成
+工程多出一套面向顾客的 SSR 店面（导航多「商城」入口）：
+
+| 路由 | 行为 |
+|---|---|
+| `get /shop` | 商品卡片列表（名称/价格 分→元/描述）；**空表自动播种 3 个演示商品**，可在后台 `<product_module>` 里增删改 |
+| `get /shop/buy/:id` | 下单：写 `<order_module>` 一行（`SHOP-<ts>-<pid>`，status=pending）→ 跳收银台 |
+| `get /shop/pay/:ono` | 收银台：微信展示 `code_url`（扫码）；PayPal 展示 `approve_url` 跳转链接 |
+| `get /shop/mock-pay/:ono` | **仅微信生成，demo 专用**：应用请求 mock 网关 `/mock/notify` 代投递签名回调（真实环境由微信服务器打 notify） |
+| `get /shop/result/:ono` | 支付结果页（paid → 成功；pending → 继续支付） |
+
+配置（`example-pay.json`）：
+
+```json
+"shop": {
+  "product_module": "product",
+  "order_module": "order",
+  "name_field": "name",
+  "price_field": "price_cents"
+}
+```
+
+`validate_shop`（lib/validate.lume）校验 product_module 必须已定义、name/price
+字段必须真实存在；店面下单写的就是 pay 段绑定的订单表，回调复用支付接线的
+验签/幂等/落库逻辑——**店面与支付共享同一条状态流转链路**。
+
 ## 字段定义（example-config.json）
 
 ```json

@@ -172,6 +172,11 @@ export func paypal_fmt_cents(cents: int): string {
   return str(d) + "." + rs;
 }
 
+// 金额展示（分 -> "x.xx" 元）：整数运算无浮点误差，店面/后台通用。
+export func fmt_cents(cents: int): string {
+  return paypal_fmt_cents(cents);
+}
+
 // 令牌简单缓存：PayPal token 有效期约 9h，进程内复用避免每次建单都握手。
 // 模块级状态随生成后的单进程生命周期持续；过期阈值取保守的 30000s。
 let PAYPAL_TOK_CACHE = { "token": "", "exp": 0 };

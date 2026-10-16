@@ -228,6 +228,24 @@ PY
   curl -s --noproxy '*' "$PB/api/order?q=$ONO" | grep -q '"status":"paid"' \
     || fail "重复回调后 status 仍应为 paid"
   echo "ok   支付：建单 -> HMAC 签名下单 -> code_url -> 回调验签 -> pending->paid -> 幂等 -> 篡改拒"
+
+  # ---- 店面（shop）：商品列表 -> 购买下单 -> 收银台 -> 模拟支付 -> 结果页 ----
+  # 场景：example-pay.json 现含 product 模块 + shop 段，gen_shop_block 生成店面路由。
+  # /shop 首访自动播种 3 个演示商品；mock-pay 由应用请求 mock 网关 /mock/notify
+  # 代投递签名回调（demo 专用，真实环境由微信服务器打 notify）。
+  echo "==> 店面阶段：商品列表 -> 购买 -> 收银台 -> 支付落库 ..."
+  SHOP_HTML="$(curl -s --noproxy '*' "$PB/shop")"
+  echo "$SHOP_HTML" | grep -q '机械键盘' || fail "店面应播种演示商品: $(echo "$SHOP_HTML" | head -5)"
+  echo "$SHOP_HTML" | grep -q '¥399.00' || fail "店面价格应格式化为元（分->x.xx）"
+  curl -s --noproxy '*' -o /dev/null "$PB/shop/buy/1" || fail "购买请求失败"
+  SONO="$(curl -s --noproxy '*' "$PB/api/order" | grep -oE 'SHOP-[0-9]+-1' | head -1)"
+  [ -n "$SONO" ] || fail "购买应产生 SHOP-* 订单"
+  PAY_HTML="$(curl -s --noproxy '*' "$PB/shop/pay/$SONO")"
+  echo "$PAY_HTML" | grep -q 'weixin://wxpay/bizpayurl' || fail "收银台应展示 code_url: $(echo "$PAY_HTML" | head -8)"
+  curl -s --noproxy '*' -o /dev/null "$PB/shop/mock-pay/$SONO" || fail "模拟支付请求失败"
+  curl -s --noproxy '*' "$PB/shop/result/$SONO" | grep -q '支付成功' || fail "模拟支付后结果页应为支付成功"
+  curl -s --noproxy '*' "$PB/api/order?q=$SONO" | grep -q '"status":"paid"' || fail "店面支付后订单应落库 paid"
+  echo "ok   店面：商品列表 -> 购买下单 -> code_url 收银台 -> mock 支付 -> paid 落库"
 else
   echo "SKIP 支付阶段: 无 python3"
 fi
