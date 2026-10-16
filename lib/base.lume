@@ -445,9 +445,13 @@ export func gen_shop_block(shop, pay): string {
     ;
   if (provider == "paypal") {
     t = t + ""
+    + "  // 迁移补列（ALTER TABLE ADD COLUMN）产生的 SQL NULL 读出来是 lume null，\n"
+    + "  // str(null) 得字面量 \"null\"——非空串，会骗过 == \"\" 守卫，故先归一。\n"
     + "  let cap_id = str(get(o, \"" + capf + "\", \"\"));\n"
+    + "  if (cap_id == \"null\") { cap_id = \"\"; }\n"
     + "  if (cap_id == \"\") {\n"
     + "    let ppid = str(get(o, \"" + ppidf + "\", \"\"));\n"
+    + "    if (ppid == \"null\") { ppid = \"\"; }\n"
     + "    if (ppid == \"\") { return ui.page(\"退款\", \"shop\", \"<h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">订单缺少 PayPal 关联 ID（早期订单），无法定位捕获记录</div><p><a href=\\\"/shop\\\">返回商城</a></p>\"); }\n"
     + "    let tk0 = pay.paypal_token(PAYPAL_CFG);\n"
     + "    if (get(tk0, \"ok\", false) != true) { return ui.page(\"退款\", \"shop\", \"<h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk0, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">重试</a></p>\"); }\n"

@@ -421,7 +421,19 @@ PY
   # 未知订单
   curl -s --noproxy '*' "$PPB/shop/refund/NOPE-1?confirm=1" | grep -q '订单不存在' \
     || fail "未知订单退款应提示不存在"
-  # 确认退款（mock 受理，回填的 capture_id 作为退款对象）
+  # 正常路径：return 处理器应回填 paypal_order_id + capture_id（退款凭据）
+  curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"capture_id":"MOCK-CAPTURE-' \
+    || fail "return 处理器应回填 capture_id"
+  # 早期订单场景：capture_id 列为 SQL NULL（迁移补列的旧单读出来是 lume null，
+  # str(null) 得字面量 "null" 会骗过 == "" 守卫）——抹成 NULL 后退款应走
+  # paypal_get_order 反查兜底而非把 "null" 当 capture_id 发给 PayPal
+  python3 - "$PAYPAL_DB" "$ONO" <<'PY' || fail "预置 NULL capture_id 失败"
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute('UPDATE "order" SET "capture_id" = NULL WHERE "order_no" = ?', (sys.argv[2],))
+con.commit(); con.close()
+PY
+  # 确认退款（mock 受理；capture_id 走反查兜底）
   curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/$ONO?confirm=1" || fail "PayPal 退款请求失败"
   curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"status":"refunded"' \
     || fail "退款后订单应落库 refunded"
@@ -432,20 +444,20 @@ PY
   # mock 侧直探：查单兜底（GET order 返回 captures）+ 同一捕获重复退 422
   # （放在所有应用侧调用之后：直取 token 会顶掉 mock 的 PP_ISSUED_TOKEN）
   PP_PPID="$(curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -o '"paypal_order_id":"[^"]*"' | head -1 | sed 's/"paypal_order_id":"//;s/"$//')"
-  PP_CAP="$(curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -o '"capture_id":"[^"]*"' | head -1 | sed 's/"capture_id":"//;s/"$//')"
   [ -n "$PP_PPID" ] || fail "return 处理器应回填 paypal_order_id"
-  [ -n "$PP_CAP" ] || fail "return 处理器应回填 capture_id"
   PP_TOK="$(curl -s --noproxy '*' -u "$PP_CLIENT_ID:$PP_SECRET" -d 'grant_type=client_credentials' \
     "$PMB/v1/oauth2/token" | grep -o '"access_token":"[^"]*"' | head -1 | sed 's/"access_token":"//;s/"$//')"
   [ -n "$PP_TOK" ] || fail "PayPal mock 应下发 access_token"
-  curl -s --noproxy '*' -H "Authorization: Bearer $PP_TOK" "$PMB/v2/checkout/orders/$PP_PPID" \
-    | grep -q "$PP_CAP" || fail "mock 查单应返回 capture_id（退款反查兜底）"
+  # 查单兜底路径：捕获 ID 从 mock 侧订单详情取（应用退款时同路反查）
+  PP_CAP="$(curl -s --noproxy '*' -H "Authorization: Bearer $PP_TOK" "$PMB/v2/checkout/orders/$PP_PPID" \
+    | grep -o '"id":"MOCK-CAPTURE-[^"]*"' | head -1 | sed 's/"id":"//;s/"$//')"
+  [ -n "$PP_CAP" ] || fail "mock 查单应返回 capture_id（退款反查兜底）"
   DUP_CODE="$(curl -s --noproxy '*' -o /dev/null -w '%{http_code}' -X POST \
     -H "Authorization: Bearer $PP_TOK" -H 'Content-Type: application/json' \
     -d '{"amount":{"value":"149.00","currency_code":"USD"}}' \
     "$PMB/v2/payments/captures/$PP_CAP/refund")"
   [ "$DUP_CODE" = "422" ] || fail "mock 对已退捕获重复退应回 422（got $DUP_CODE）"
-  echo "ok   退款（PayPal）：确认页 -> capture refund -> refunded 落库 -> 重复退幂等 -> 查单兜底 -> mock 422 对账"
+  echo "ok   退款（PayPal）：确认页 -> capture refund -> refunded 落库 -> 重复退幂等 -> NULL 列兜底 -> 查单 -> mock 422 对账"
 else
   echo "SKIP 支付阶段(PayPal): 无 python3"
 fi
