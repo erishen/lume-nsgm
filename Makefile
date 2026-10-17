@@ -12,9 +12,9 @@ TARGET = main.lume
         test-e2e
 
 # Docker 相关变量（可用 make ... DOCKER_PORT=19090 覆盖宿主端口）
-DOCKER_PORT  ?= 18081
-DOCKER_IMAGE ?= lume-nsgm-app:latest
-DOCKER_NAME  ?= lume-nsgm-app
+DOCKER_PORT  ?= 18082
+DOCKER_IMAGE ?= lume-nsgm-app:paypal
+DOCKER_NAME  ?= lume-nsgm-paypal
 
 # 源比产物新（或产物缺失）则判定过期：main.lume / 配置 / lib / scaffold / templates 任一文件
 # （*.md 是纯文档，排除）
@@ -103,22 +103,24 @@ clean:
 # ---------------------------------------------------------------------------
 # Docker — 容器化运行生成的全栈应用（构建上下文 = work/lume 父目录）
 #
-#   make docker-build   # 构建镜像（编译 lume-core + 重新生成 + 构建前端），宿主端口默认 18081
+#   make docker-build   # 构建镜像（编译 lume-core + 重新生成 + 构建前端），宿主端口默认 18082
 #   make docker-up      # 后台启动（首次自动 --build），端口 ${DOCKER_PORT}:18081
 #   make docker-logs    # 跟踪容器日志
 #   make docker-ps      # 查看容器状态
-#   make docker-down    # 停止并移除容器（数据卷 nsgm-data 保留）
+#   make docker-down    # 停止并移除容器（数据卷 nsgm-paypal-data 保留）
 #   make docker-clean   # 停止并删除容器 + 数据卷（会清空数据，谨慎）
 #
-# 说明：容器内始终监听 18081（>10000，避开常用低位端口）；宿主端口默认 18081，
-# 可用 make docker-up DOCKER_PORT=19090 覆盖。OrbStack 下 buildx 活动追踪偶发
+# 说明：compose 服务即 PayPal 支付变体（NSGM_CONFIG=example-paypal.json，
+# 容器 lume-nsgm-paypal、数据卷 nsgm-paypal-data）。容器内始终监听 18081
+# （>10000，避开常用低位端口）；宿主端口默认 18082，可用 make docker-up
+# DOCKER_PORT=19090 覆盖。OrbStack 下 buildx 活动追踪偶发
 # “operation not permitted”，统一用 DOCKER_BUILDKIT=0（legacy builder）规避。
 # ---------------------------------------------------------------------------
 
 # 构建镜像（构建上下文为父目录 work/lume，因为 Dockerfile 需同时拿到
-# lume-core 源码与生成器源码）。
+# lume-core 源码与生成器源码；支付变体由 NSGM_CONFIG 指定）。
 docker-build:
-	DOCKER_BUILDKIT=0 docker build -f Dockerfile -t $(DOCKER_IMAGE) ..
+	DOCKER_BUILDKIT=0 docker build -f Dockerfile --build-arg NSGM_CONFIG=example-paypal.json -t $(DOCKER_IMAGE) ..
 
 # 后台启动（端口 DOCKER_PORT -> 容器 18081，数据卷持久化）。
 docker-up:
@@ -132,7 +134,7 @@ docker-logs:
 docker-ps:
 	docker compose ps
 
-# 停止并移除容器（数据卷 nsgm-data 保留，数据不丢）。
+# 停止并移除容器（数据卷 nsgm-paypal-data 保留，数据不丢）。
 docker-down:
 	docker compose down
 

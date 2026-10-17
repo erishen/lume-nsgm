@@ -237,10 +237,11 @@ pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ## Docker 部署
 
 把**生成的全栈应用**（lume-core 后端 + React 前端 + SQLite）打成一个镜像，
-`docker compose up --build` 即可在 `:18081` 跑起来（容器端口 18081，>10000，避开常用低位端口）。镜像在构建期做的事：
+`docker compose up --build` 即可在 `:18082` 跑起来（容器端口 18081，>10000，避开常用低位端口）。
+compose 服务默认即 **PayPal 支付变体**（`NSGM_CONFIG=example-paypal.json`）。镜像在构建期做的事：
 
 1. 从 `lume-core` 源码编译 `lume-core` 二进制（含 SQLite 后端，探测 `libsqlite3` 自动编入）；
-2. 用该二进制跑生成器 `main.lume example-config.json` **确定性重新生成** `gen/`；
+2. 用该二进制跑生成器 `main.lume example-paypal.json`（compose 的构建参数，即支付变体）**确定性重新生成** `gen/`；
 3. `pnpm` 构建 React 前端（产物以相对 `base` 挂到 `/spa/`），由 lume-core 的 docroot 静态托管。
 
 > 构建上下文必须是 `work/lume`（`lume-core` 与 `lume-nsgm` 的父目录），
@@ -250,10 +251,10 @@ pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 ```bash
 # 方式一：Makefile（推荐，自动处理构建上下文、端口与数据卷）
 make docker-build     # 构建镜像（编译 lume-core + 重新生成 + 构建前端）
-make docker-up        # 后台启动（首次自动 --build），宿主端口默认 18081
+make docker-up        # 后台启动（首次自动 --build），宿主端口默认 18082
 make docker-logs      # 跟踪日志
 make docker-ps        # 查看容器状态
-make docker-down      # 停止并移除容器（数据卷 nsgm-data 保留）
+make docker-down      # 停止并移除容器（数据卷 nsgm-paypal-data 保留）
 make docker-clean     # 停止并删除容器 + 数据卷（清空数据，谨慎）
 
 # 宿主端口可覆盖（容器内始终监听 18081）：
@@ -263,18 +264,18 @@ make docker-up DOCKER_PORT=19090
 cd lume-nsgm
 docker compose up --build          # 首次构建（编译 lume-core + 重新生成 + 构建前端）
 docker compose up -d              # 后台运行
-docker compose down               # 停止并移除容器（数据卷 nsgm-data 保留）
+docker compose down               # 停止并移除容器（数据卷 nsgm-paypal-data 保留）
 
 # 方式三：脚本（自动定位父目录作为构建上下文）
-./docker-build.sh                 # 产出镜像 lume-nsgm-app:latest
-docker run --rm -p 18081:18081 -v lume-nsgm-data:/app/data lume-nsgm-app:latest
+./docker-build.sh                 # 产出镜像 lume-nsgm-app:paypal
+docker run --rm -p 18082:18081 -v nsgm-paypal-data:/data lume-nsgm-app:paypal
 ```
 
-访问（端口默认 18081，可用 `DOCKER_PORT` 覆盖宿主端口）：
+访问（宿主端口默认 18082，可用 `DOCKER_PORT` 覆盖宿主端口）：
 
-- 首页 / SSR 页面： `http://localhost:18081/`
-- React SPA（主 UI）： `http://localhost:18081/spa/`（hash 路由，API 走同源 `/api`）
-- REST API： `http://localhost:18081/api/<module>`
+- 首页 / SSR 页面： `http://localhost:18082/`
+- React SPA（主 UI）： `http://localhost:18082/spa/`（hash 路由，API 走同源 `/api`）
+- REST API： `http://localhost:18082/api/<module>`
 
 容器内配置（compose 的 `environment` 段，生成工程从 env 读取，容器端口固定 18081）：
 
@@ -283,13 +284,13 @@ docker run --rm -p 18081:18081 -v lume-nsgm-data:/app/data lume-nsgm-app:latest
 | `PORT` | `18081` | 服务监听端口（>10000，避开常用低位端口） |
 | `HOST` | `0.0.0.0` | 绑定地址（lume-core 默认 `127.0.0.1`，容器内必须放通） |
 | `WORKERS` | `1` | prefork worker 数（Linux 下多 worker 偶发初始化不一致） |
-| `NSGM_DB` | `/app/data/app.db` | SQLite 数据文件路径 |
+| `NSGM_DB` | `/data/nsgm-paypal.db` | SQLite 数据文件路径（命名卷 `nsgm-paypal-data` 挂 `/data`） |
 
-- **健康检查**：compose 带 `healthcheck`（每 30s 探 `GET /`，两种构建配置的工程都有该路由，`docker compose ps` 可见 `healthy`）
+- **健康检查**：compose 带 `healthcheck`（每 30s 探 `GET /`，任何构建配置的工程都有该路由，`docker compose ps` 可见 `healthy`）
 - **schema 演进**：改字段后重新 `make docker-build`，容器重启时自动 `ALTER TABLE ADD COLUMN` 补齐缺失列，数据卷里的旧数据不丢
-- **支付变体构建**：`docker build --build-arg NSGM_CONFIG=example-paypal.json -t lume-nsgm-app:paypal .`（构建上下文同 `work/lume`）——镜像内跑的是带 PayPal 支付路由的生成工程，client_secret 等敏感项仍走环境变量注入（`PAYPAL_KEY` 等），不进镜像层
+- **构建变体**：compose 服务默认即支付变体（`example-paypal.json`）。普通 CRUD 变体手动构建：`docker build --build-arg NSGM_CONFIG=example-config.json -t lume-nsgm-app:crud .`（构建上下文同 `work/lume`）——client_secret 等敏感项一律走环境变量注入（`PAYPAL_KEY` 等），不进镜像层
 
-数据持久化：SQLite 文件落在容器内 `/app/data/app.db`，已挂为命名卷 `nsgm-data`
+数据持久化：SQLite 文件落在容器内 `/data/nsgm-paypal.db`，已挂为命名卷 `nsgm-paypal-data`
 （可用环境变量 `NSGM_DB` 覆盖路径）。
 
 ## 支付（PayPal Express Checkout，沙箱 mock 全链路）

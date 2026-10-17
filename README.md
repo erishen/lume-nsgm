@@ -234,10 +234,10 @@ pnpm dev            # http://localhost:5173, /api proxied by Vite to lume :8081
 
 ## Docker deployment
 
-Package **the generated full-stack application** (lume-core backend + React frontend + SQLite) into a single image; `docker compose up --build` brings it up on `:18081` (container port 18081, >10000, clear of common low ports). At build time the image:
+Package **the generated full-stack application** (lume-core backend + React frontend + SQLite) into a single image; `docker compose up --build` brings it up on `:18082` (container port 18081, >10000, clear of common low ports). The compose service is the **PayPal payment variant** by default (`NSGM_CONFIG=example-paypal.json`). At build time the image:
 
 1. Compiles the `lume-core` binary from `lume-core` source (with the SQLite backend, auto-enabled when `libsqlite3` is detected);
-2. Runs the generator `main.lume example-config.json` with that binary to **deterministically regenerate** `gen/`;
+2. Runs the generator `main.lume example-paypal.json` (the compose build argument — the payment variant) with that binary to **deterministically regenerate** `gen/`;
 3. Builds the React frontend with `pnpm` (output mounted at `/spa/` with a relative base), served as static files by lume-core's docroot.
 
 > The build context must be `work/lume` (the parent directory of `lume-core` and `lume-nsgm`), because the Dockerfile needs both the lume-core source and the generator source. Companion files are provided: `Dockerfile` / `docker-compose.yml` / `docker-build.sh`, plus the Makefile's `docker-*` commands.
@@ -245,10 +245,10 @@ Package **the generated full-stack application** (lume-core backend + React fron
 ```bash
 # Option 1: Makefile (recommended — handles build context, ports and the data volume automatically)
 make docker-build     # build the image (compile lume-core + regenerate + build the frontend)
-make docker-up        # start in the background (--build on first run), host port defaults to 18081
+make docker-up        # start in the background (--build on first run), host port defaults to 18082
 make docker-logs      # follow the logs
 make docker-ps        # show container status
-make docker-down      # stop and remove the container (the nsgm-data volume is kept)
+make docker-down      # stop and remove the container (the nsgm-paypal-data volume is kept)
 make docker-clean     # stop and remove the container + volume (wipes data — careful)
 
 # Override the host port (the container always listens on 18081):
@@ -258,18 +258,18 @@ make docker-up DOCKER_PORT=19090
 cd lume-nsgm
 docker compose up --build          # first build (compile lume-core + regenerate + build the frontend)
 docker compose up -d              # run in the background
-docker compose down               # stop and remove the container (the nsgm-data volume is kept)
+docker compose down               # stop and remove the container (the nsgm-paypal-data volume is kept)
 
 # Option 3: script (locates the parent directory as the build context automatically)
-./docker-build.sh                 # produces the image lume-nsgm-app:latest
-docker run --rm -p 18081:18081 -v lume-nsgm-data:/app/data lume-nsgm-app:latest
+./docker-build.sh                 # produces the image lume-nsgm-app:paypal
+docker run --rm -p 18082:18081 -v nsgm-paypal-data:/data lume-nsgm-app:paypal
 ```
 
-Access (port defaults to 18081; override the host port with `DOCKER_PORT`):
+Access (host port defaults to 18082; override it with `DOCKER_PORT`):
 
-- Home / SSR pages: `http://localhost:18081/`
-- React SPA (the main UI): `http://localhost:18081/spa/` (hash router, same-origin `/api`)
-- REST API: `http://localhost:18081/api/<module>`
+- Home / SSR pages: `http://localhost:18082/`
+- React SPA (the main UI): `http://localhost:18082/spa/` (hash router, same-origin `/api`)
+- REST API: `http://localhost:18082/api/<module>`
 
 In-container configuration (the compose `environment` section; the generated project reads these from env, container port fixed at 18081):
 
@@ -278,13 +278,13 @@ In-container configuration (the compose `environment` section; the generated pro
 | `PORT` | `18081` | listen port (>10000, clear of common low ports) |
 | `HOST` | `0.0.0.0` | bind address (lume-core defaults to `127.0.0.1`; containers must open up) |
 | `WORKERS` | `1` | prefork worker count (multiple workers occasionally hit init inconsistencies on Linux) |
-| `NSGM_DB` | `/app/data/app.db` | SQLite data file path |
+| `NSGM_DB` | `/data/nsgm-paypal.db` | SQLite data file path (named volume `nsgm-paypal-data` mounted at `/data`) |
 
-- **Health check**: compose ships a `healthcheck` (probes `GET /` every 30s; both build configurations have that route, so `docker compose ps` shows `healthy`)
+- **Health check**: compose ships a `healthcheck` (probes `GET /` every 30s; every build configuration has that route, so `docker compose ps` shows `healthy`)
 - **Schema evolution**: after changing fields, re-run `make docker-build`; on container restart the missing columns are added automatically via `ALTER TABLE ADD COLUMN` and old data in the volume is preserved
-- **Payment variant build**: `docker build --build-arg NSGM_CONFIG=example-paypal.json -t lume-nsgm-app:paypal .` (same `work/lume` build context) — the image runs the generated project with PayPal payment routes; sensitive items such as client_secret are still injected via environment variables (`PAYPAL_KEY` etc.) and never baked into the image layer
+- **Build variants**: the compose service is the payment variant by default (`example-paypal.json`). For the plain CRUD variant, build manually: `docker build --build-arg NSGM_CONFIG=example-config.json -t lume-nsgm-app:crud .` (same `work/lume` build context) — sensitive items such as client_secret are always injected via environment variables (`PAYPAL_KEY` etc.) and never baked into the image layer
 
-Data persistence: the SQLite file lives at `/app/data/app.db` inside the container, mounted as the named volume `nsgm-data` (override the path with the `NSGM_DB` environment variable).
+Data persistence: the SQLite file lives at `/data/nsgm-paypal.db` inside the container, mounted as the named volume `nsgm-paypal-data` (override the path with the `NSGM_DB` environment variable).
 
 ## Payment (PayPal Express Checkout, full sandbox-mock chain)
 
