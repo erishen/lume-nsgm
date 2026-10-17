@@ -87,7 +87,7 @@ export func gen_ui(out: string, mods, shop): int {
 // gw 可被 PAY_GATEWAY 覆盖，return/cancel 基址走 PAYPAL_RETURN_URL（默认 127.0.0.1:8081）。
 // 创建接口返回 JSON { ok, approve_url, paypal_order_id }（前端据此 window.location 跳转）；
 // PayPal 跳回 return?token=<pp_order_id>&order_no=<本地单号> 后服务端捕获并改状态。
-// 真实 PayPal 的差距（已知边界，见 README「支付」节 S7/PayPal）：
+// 真实 PayPal 的差距（已知边界，见 README「支付 / Payment」节 S7/PayPal）：
 //   - webhook 验签真实为 HMAC(crc32(body))，本库简化为纯 HMAC（沙箱够用）；
 //   - 返回/回调走 query_params（core 的 req.query_params 已解析），不依赖请求头。
 func gen_paypal_block(pay): string {
@@ -115,7 +115,7 @@ func gen_paypal_block(pay): string {
   let b = "// ---- PayPal 支付接线（lume-nsgm 生成；client_id 来自配置，client_secret 走环境变量 " + secret_env + "）----\n"
     + "// 与真实 PayPal 的差距：webhook 验签为 HMAC 简化版（真实含 crc32(body)，\n"
     + "// 需 core 补 crc32 内建或外挂 sidecar）；返回/回调走 query_params（req 无 headers\n"
-    + "// 暴露）。详见 README「支付」节。\n"
+    + "// 暴露）。详见 README「支付 / Payment」节。\n"
     + "let PAYPAL_CLIENT_ID_RAW = env(\"PAYPAL_CLIENT_ID\");\n"
     + "let PAYPAL_CLIENT_ID = (PAYPAL_CLIENT_ID_RAW != null && PAYPAL_CLIENT_ID_RAW != \"\" ? str(PAYPAL_CLIENT_ID_RAW) : \"" + client_id + "\");\n"
     + "let PAYPAL_CLIENT_SECRET_RAW = env(\"" + secret_env + "\");\n"

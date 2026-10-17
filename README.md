@@ -1,31 +1,35 @@
 # lume-nsgm
 
-**AI-friendly 的确定性 CRUD 生成层**：输入模块字段定义（JSON schema），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API + React 前端），`lume-core` 单二进制一条命令运行。
+[English](README.md) · [简体中文](README.zh.md)
 
-> 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**，产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume-core 应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建 + docroot 静态 + `:name` 动态路由，core ≥ 0.7.0），零 Node 依赖；生成器侧同样用 lume-core 解释执行。
+**An AI-friendly, deterministic CRUD generation layer**: feed it module field definitions (JSON schema) and it emits a full-stack CRUD project built on lume (SQLite storage + SSR pages + REST API + React frontend), run by a single `lume-core` binary.
 
-## 为什么 AI 时代还需要它
+> Positioning: lume-nsgm replaces **nsgm's generator and CLI layer**. The output shape evolves from Next.js/Express + GraphQL + Antd into a **lume-core application** (`server`/`route`/`run` + built-in `sql_query`/`sql_write` + docroot static serving + `:name` dynamic routes, core ≥ 0.7.0), with zero Node dependencies; the generator itself is likewise interpreted by lume-core.
 
-让 AI 直接生成整个应用，问题在于**输出空间无限大**：每一行代码都是新的幻觉面，每次生成都要重新验证。lume-nsgm 把问题切成两半——
+## Why it still matters in the AI era
+
+Letting an AI generate an entire application directly fails because the **output space is unbounded**: every line of code is a new hallucination surface, and every generation has to be verified again from scratch. lume-nsgm splits the problem in half —
 
 ```
-AI 只产出 schema（受控、小、可校验的 JSON）
+The AI emits only the schema (controlled, small, verifiable JSON)
    ↓
-nsgm 确定性生成（注入防护 / 转义 / 分页边界 / UI 规范，修一次处处对，
-   质量由 tests/t1-t5 套件与端到端探针固化）
+nsgm generates deterministically (injection guards / escaping / pagination
+   boundaries / UI conventions — fixed once, correct everywhere; quality
+   locked in by the tests/t1-t5 suites and the e2e probes)
    ↓
-AI 再对 lume 代码做增量修改（小语言、语法面小，AI 的上下文负担极小）
+The AI then makes incremental edits to the lume code (small language,
+   small grammar surface, minimal context burden for the AI)
 ```
 
-- **AI 做决策，模板做执行**：schema 本身就是给 AI 的接口。生成器保证的是「无论谁写 schema，产物质量一致」。
-- **验证一次，永久复用**：模板产出的 CRUD 行为（31 项底座探针 + 生成器套件 + UI 截图）已验证；AI 手写代码则每个项目都要重走一遍验证。
-- **对 lume 生态**：lume-nsgm 是 lume 的第一个真实业务级消费者——动态路由、SQLite 内建、`json()`、三元运算符等语言特性都是它逼出来的。它是 lume-core 从玩具走向可用运行时的试金石。
+- **AI decides, templates execute**: the schema itself is the interface handed to the AI. What the generator guarantees is "no matter who writes the schema, the output quality is identical".
+- **Verify once, reuse forever**: the CRUD behavior of template output (31 baseline probes + the generator suites + UI snapshots) is already verified; hand-written AI code has to redo that whole verification cycle for every single project.
+- **For the lume ecosystem**: lume-nsgm is lume's first real business-grade consumer — dynamic routes, SQLite built-ins, `json()`, and the ternary operator were all forced into existence by it. It is the touchstone that takes lume-core from toy to usable runtime.
 
-一句话：它不是「替你打字的脚手架」，而是 **AI 编码时代的幻觉降噪器**——AI 写代码跑在受限运行时 + 已验证模板里，比裸生成靠谱得多。
+In one line: it is not a scaffold that types for you, but a **hallucination noise filter for the AI coding era** — AI-written code running on a constrained runtime with verified templates is far more dependable than raw generation.
 
-### schema 校验（AI-friendly 报错层）
+### Schema validation (the AI-friendly error layer)
 
-`lib/validate.lume` 在生成前对 config 做**一次性全量校验**（不是改一个报一个），每条错误带精确路径与修复提示，AI 一轮即可修完：
+`lib/validate.lume` runs a **one-shot full validation** of the config before generation (not one error at a time); every error carries a precise path and a fix hint, so the AI can fix everything in a single round:
 
 ```
 $ lume-core main.lume bad.json
@@ -35,97 +39,97 @@ schema validation failed (2 error(s)) in "bad.json":
 fix the config and re-run. ...
 ```
 
-校验项：JSON 合法性、`modules` 非空、模块/字段 `name` 必须匹配 `[a-z][a-z0-9_]*`（**该名直接拼进 SQL DDL 与路由，白名单同时封死注入面**——曾实测 `"evil\"; DROP TABLE x--"` 可穿过无校验的生成器）、类型白名单、模块/字段重名（路由冲突）、空 `fields`。校验失败退出码 1，生成被完全跳过（此前缺 name 的模块会被静默跳过并谎报成功）。回归测试见 `tests/t6.lume`（16 断言）。
+Validation covers: JSON well-formedness, non-empty `modules`, module/field names matching `[a-z][a-z0-9_]*` (**the name is interpolated straight into SQL DDL and routes, so the whitelist closes the injection surface at the same time** — `"evil\"; DROP TABLE x--"` was empirically shown to slip through an unvalidated generator), a type whitelist, duplicate module/field names (route conflicts), and empty `fields`. A failed validation exits with code 1 and generation is skipped entirely (previously, a module missing a name was silently skipped while still reporting success). Regression tests: `tests/t6.lume` (16 assertions).
 
-## 目录
+## Layout
 
 ```
 lume-nsgm/
-├── main.lume            # CLI 入口（create / init / 读 config 批量）
-├── example-config.json  # 批量生成配置（user + order）
-├── templates/           # 渲染模板（mod / sql / react_page）
-│   ├── mod.tpl          # 模块文件模板（DDL + 数据驱动字段表 + 路由 + SSR 页面）
-│   ├── sql.tpl          # 建表 DDL 导出模板
-│   └── react_page.tpl   # 每模块 React 页面模板（<Ctrl>Page.tsx）
+├── main.lume            # CLI entry (create / init / batch from config)
+├── example-config.json  # batch generation config (user + order)
+├── templates/           # render templates (mod / sql / react_page)
+│   ├── mod.tpl          # module file template (DDL + data-driven field tables + routes + SSR pages)
+│   ├── sql.tpl          # CREATE TABLE DDL export template
+│   └── react_page.tpl   # per-module React page template (<Ctrl>Page.tsx)
 ├── lib/
-│   ├── model.lume       # 字段模型 + 类型映射（sql 类型、下标过滤）
-│   ├── tpl.lume         # 极简模板引擎（{{var}} / {{#each}} / {{#if}}）
-│   ├── sql.lume         # SQL DDL 生成器（模板渲染）
-│   ├── modlume.lume     # 模块生成器：数据驱动字段表 + 路由 + SSR 页面
-│   ├── reactgen.lume    # React 前端生成器（web/：Vite + React + TS SPA）
-│   ├── scaffold.lume    # 文件树写入（输出 gen/ 全栈工程）
-│   ├── validate.lume    # schema 一次性全量校验（注入防护 / 类型白名单 / 重名）
-│   ├── assert.lume      # 测试断言辅助（ok/eq/fail，main() 返回失败计数即退出码）
-│   └── base.lume        # 运行时内建辅助引用（SQL / JSON / 路由常量）
-├── scaffold/            # 工程基座静态模板（复制进 gen/）
-│   ├── lib/db.lume      # SQLite 存取辅助（dsn / init / 分页 / 计数）
-│   ├── lib/pay.lume     # 支付库（PayPal Express Checkout）：OAuth2 取 token / 建单 / 捕获 / 查单 / 查捕获 / webhook 验签 / 退款（复制进 gen/）
-│   ├── web/             # Vite + React + TS 静态壳（package.json / vite / tsconfig / main / api）
-│   └── www/             # SSR 静态样式 + 回退 JS（app.css / app.js）
-└── tests/
-    ├── t1.lume          # model / sql 生成器验证（13 断言）
-    ├── t2.lume          # modlume / reactgen 模块与前端生成器验证
-    ├── t3.lume          # 模板引擎验证（each / if / 变量替换）
-    ├── t4.lume          # sql_default() 回归断言
-    ├── t5.lume          # React 前端生成器回归断言
-    ├── t6.lume          # schema 校验回归断言（16 断言，validate.lume）
-    └── t7.lume          # 支付回归断言（签名向量 / validate_pay / 字段 default）
+│   ├── model.lume       # field model + type mapping (sql types, index filters)
+│   ├── tpl.lume         # minimal template engine ({{var}} / {{#each}} / {{#if}})
+│   ├── sql.lume         # SQL DDL generator (template rendering)
+│   ├── modlume.lume     # module generator: data-driven field tables + routes + SSR pages
+│   ├── reactgen.lume    # React frontend generator (web/: Vite + React + TS SPA)
+│   ├── scaffold.lume    # file-tree writer (emits the gen/ full-stack project)
+│   ├── validate.lume    # one-shot schema validation (injection guards / type whitelist / duplicates)
+│   ├── assert.lume      # test assertion helpers (ok/eq/fail; main() returns the failure count as exit code)
+│   └── base.lume        # runtime builtin helper references (SQL / JSON / route constants)
+├── scaffold/            # static project base templates (copied into gen/)
+│   ├── lib/db.lume      # SQLite access helpers (dsn / init / pagination / counts)
+│   ├── lib/pay.lume     # payment library (PayPal Express Checkout): OAuth2 token / create / capture / get order / get capture / webhook verification / refund (copied into gen/)
+│   ├── web/             # Vite + React + TS static shell (package.json / vite / tsconfig / main / api)
+│   └── www/             # SSR static styles + fallback JS (app.css / app.js)
+├── tests/
+│   ├── t1.lume          # model / sql generator verification (13 assertions)
+│   ├── t2.lume          # modlume / reactgen module and frontend generator verification
+│   ├── t3.lume          # template engine verification (each / if / variable substitution)
+│   ├── t4.lume          # sql_default() regression assertions
+│   ├── t5.lume          # React frontend generator regression assertions
+│   ├── t6.lume          # schema validation regression assertions (16 assertions, validate.lume)
+│   └── t7.lume          # payment regression assertions (signature vectors / validate_pay / field defaults)
 ├── scripts/
-│   ├── mock_pay_gateway.py  # 模拟 PayPal 网关（OAuth2/建单/捕获/查单/查捕获/退款，独立实现与 lume 侧交叉验证）
-│   ├── check-privacy.py     # 发布前隐私自检（跟踪文件里的本机路径/私有工作区名/凭据形态）
-│   └── e2e.sh          # 端到端探针：起生成工程 + curl 跑 SSR/CRUD/搜索/分页/迁移/支付
-├── Dockerfile / docker-compose.yml / docker-build.sh   # 容器化部署（见「Docker 部署」）
-├── example-config.json / example-paypal.json  # 批量生成配置（普通 / PayPal 支付变体）
-└── .env.example        # .env 模板（LUME_CORE_BIN 路径；.env 本体进 .gitignore）
+│   ├── mock_pay_gateway.py  # mock PayPal gateway (OAuth2/create/capture/get order/get capture/refund — an independent implementation cross-checked against the lume side)
+│   ├── check-privacy.py     # pre-publish privacy self-check (local paths / private workspace names / credential forms in tracked files)
+│   └── e2e.sh          # e2e probes: boot the generated project + curl through SSR/CRUD/search/pagination/migration/payment
+├── Dockerfile / docker-compose.yml / docker-build.sh   # containerized deployment (see "Docker deployment")
+├── example-config.json / example-paypal.json  # batch generation configs (plain / PayPal payment variant)
+└── .env.example        # .env template (LUME_CORE_BIN path; the .env file itself is git-ignored)
 ```
 
-## 前置条件：安装 lume-core
+## Prerequisites: install lume-core
 
-lume-nsgm 本身只是一堆 `.lume` 脚本和模板，**运行它需要一个 lume-core 运行时**（编译器 / CLI 二进制）。lume-core 是自研的单文件 C11 工程，除 libc（探测到 `llvm-config` 时再链 libLLVM）外不依赖任何东西，不需要 node / pnpm / SQLite。
+lume-nsgm itself is nothing but `.lume` scripts and templates — **running it requires a lume-core runtime** (the compiler / CLI binary). lume-core is a self-built single-file C11 project that depends on nothing beyond libc (plus libLLVM when `llvm-config` is detected); no node / pnpm / SQLite required.
 
-### 方式一：一键安装（推荐）
+### Option 1: one-line install (recommended)
 
-按平台下载预编译 tarball，二进制落到 `~/.local/bin/lume-core`（examples + docs 落到 `~/.local/share/lume-core`）：
+Download the prebuilt tarball for your platform; the binary lands in `~/.local/bin/lume-core` (examples + docs land in `~/.local/share/lume-core`):
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/erishen/lume-core/main/install.sh | sh
 ```
 
-可用环境变量覆盖（在管道命令前 `export`）：
+Overridable environment variables (`export` them before the piped command):
 
-| 变量 | 默认 | 含义 |
+| Variable | Default | Meaning |
 |---|---|---|
-| `LUME_CORE_VERSION` | `latest` | 要装的版本 tag |
-| `LUME_CORE_PREFIX`  | `$HOME/.local` | 安装根目录（`$PREFIX/bin`） |
-| `LUME_CORE_SHA256`  | — | tarball 的预期 sha256（设置后才校验） |
-| `LUME_CORE_REPO`    | `erishen/lume-core` | 拉取所用的 GitHub 仓库 |
+| `LUME_CORE_VERSION` | `latest` | version tag to install |
+| `LUME_CORE_PREFIX`  | `$HOME/.local` | install root (`$PREFIX/bin`) |
+| `LUME_CORE_SHA256`  | — | expected sha256 of the tarball (verified only when set) |
+| `LUME_CORE_REPO`    | `erishen/lume-core` | GitHub repo used for the download |
 
-### 方式二：从源码构建
+### Option 2: build from source
 
-依赖：一个 C11 编译器（`cc`）；若要原生编译能力 `--compile-llvm`，`PATH` 里需有 `llvm-config`（macOS 上 brew 装在 `/opt/homebrew/opt/llvm` 会被自动探测到）。**没有 LLVM 也能编出 `bin/lume-core`**，只是 `--compile-llvm` 不可用。
+Dependencies: a C11 compiler (`cc`); for the native compilation capability `--compile-llvm`, `llvm-config` must be on `PATH` (on macOS, brew's install under `/opt/homebrew/opt/llvm` is auto-detected). **You can still build `bin/lume-core` without LLVM** — only `--compile-llvm` becomes unavailable.
 
 ```bash
-git clone <lume-core 仓库> lume-core && cd lume-core
+git clone <lume-core repo> lume-core && cd lume-core
 make           # -> bin/lume-core
-make check     # 自检：内置示例都过类型检查
-# 可选：sudo cp bin/lume-core /usr/local/bin/lume-core
+make check     # self-check: all built-in examples pass type checking
+# optional: sudo cp bin/lume-core /usr/local/bin/lume-core
 ```
 
-Windows（**MSYS2 的 MINGW64 shell**，不是 MSVC）：
+Windows (**MSYS2's MINGW64 shell**, not MSVC):
 
 ```bash
 pacman -S base-devel mingw-w64-x86_64-toolchain mingw-w64-x86_64-clang
 make           # -> bin/lume-core.exe
 ```
 
-> Windows 上 `--watch` 与出站 HTTP 内建（`http_get` 等）暂不可用，但 lume-nsgm 只用解释器 + 文件 I/O + `read_stdin`，不受影响。
+> On Windows, `--watch` and the outbound HTTP builtins (`http_get` etc.) are not yet available, but lume-nsgm only uses the interpreter + file I/O + `read_stdin`, so it is unaffected.
 
-### 让 lume-nsgm 找到运行时
+### Pointing lume-nsgm at the runtime
 
-两种方式二选一：
+Pick one of two ways:
 
-1. 把 `lume-core` 放进 `PATH`（方式一默认装到 `~/.local/bin`，需自己加进 `PATH`），然后直接 `make run`；
-2. 在 lume-nsgm 根目录新建 `.env`，写死本机绝对路径（Windows 用 `lume-core.exe`）：
+1. Put `lume-core` on `PATH` (option 1 installs to `~/.local/bin` by default — add it to `PATH` yourself), then just run `make run`;
+2. Create a `.env` in the lume-nsgm root with an absolute path (on Windows, `lume-core.exe`):
 
    ```bash
    # lume-nsgm/.env
@@ -133,264 +137,221 @@ make           # -> bin/lume-core.exe
    # LUME_CORE_BIN=E:/Workspace/lume-core/bin/lume-core.exe   # Windows
    ```
 
-   Makefile 已用 `-include .env` + `$(or $(LUME_CORE_BIN),lume-core)` 解析：有 `.env` 优先用它的绝对路径，没有则回退到 PATH 上的 `lume-core`。
+   The Makefile already resolves this via `-include .env` + `$(or $(LUME_CORE_BIN),lume-core)`: with a `.env`, its absolute path wins; without one, it falls back to `lume-core` on PATH.
 
-## 用法
+## Usage
 
 ```bash
-# 批量：读 example-config.json 生成 user + order 两个模块
+# Batch: read example-config.json and generate the user + order modules
 make run
 
-# 单模块：命令行模板字段
+# Single module: template fields from the command line
 make dev
 
-# 交互式字段录入后生成（stdin 逐行输入 name type [required] [searchable]，空行结束）
+# Interactive field entry, then generate (stdin, one field per line: name type [required] [searchable], blank line ends)
 echo "name varchar required searchable" | make init MODULE=product
 
-# 语法检查（含模板引擎 t3）
+# Syntax check (includes template engine t3)
 make check
 
-# 发布前隐私自检（跟踪文件里的本机路径/私有工作区名/凭据形态；make test 已内含）
+# Pre-publish privacy self-check (local paths / private workspace names / credential forms in tracked files; also part of make test)
 make check-privacy
 
-# 生成器断言套件（t1-t6）
+# Generator assertion suite (t1-t6)
 make test
 
-# 端到端探针：起生成工程 + curl 跑 SSR/静态/CRUD/搜索/分页/迁移（scripts/e2e.sh）
+# E2E probes: boot the generated project + curl through SSR/static/CRUD/search/pagination/migration (scripts/e2e.sh)
 make test-e2e
 
-# 清理生成目录
+# Clean the generated directory
 make clean
 ```
 
-也可以直接：
+You can also call it directly:
 
 ```bash
-# 不经过 make 的直调方式（需 lume-core 在 PATH，或用 .env 的 LUME_CORE_BIN 指路径）
+# Direct invocation, bypassing make (requires lume-core on PATH, or point LUME_CORE_BIN in .env at it)
 lume-core main.lume example-config.json
 lume-core main.lume create order
 lume-core main.lume init product
-# Windows：把 lume-core 换成 lume-core.exe（或写进 .env 的 LUME_CORE_BIN）
+# Windows: replace lume-core with lume-core.exe (or set LUME_CORE_BIN in .env)
 ```
 
-生成产物落在 `./gen/`（**以 lume 为底的可运行工程**：lume-core 跑服务端 + React 前端）：
+Output lands in `./gen/` (**a runnable project built on lume**: lume-core serving the backend + React frontend):
 
 ```
 gen/
-├── app.lume               # 入口：server 块 + 模块装配（import 即注册路由）+ 建表 + run()
+├── app.lume               # entry: server block + module assembly (import registers routes) + table creation + run()
 ├── lib/
-│   ├── ui.lume            # SSR 组件库（导航由模块清单注入）
-│   └── db.lume            # SQLite 存取辅助（dsn/init/分页/计数）
-├── modules/{module}.lume  # 每模块：DDL + 数据驱动字段表 + 路由 + SSR 页面
-├── sql/{module}.sql       # 建表 DDL 导出（与模块内嵌一致，供人工核查）
-├── web/                   # React 前端（Vite + React + TS，pnpm 管理）
+│   ├── ui.lume            # SSR component library (nav injected from the module list)
+│   └── db.lume            # SQLite access helpers (dsn/init/pagination/counts)
+├── modules/{module}.lume  # per module: DDL + data-driven field tables + routes + SSR pages
+├── sql/{module}.sql       # CREATE TABLE DDL export (identical to the in-module copy, for manual review)
+├── web/                   # React frontend (Vite + React + TS, managed with pnpm)
 │   ├── package.json / vite.config.ts / tsconfig.json / index.html
 │   └── src/
-│       ├── main.tsx / App.tsx    # 入口 + hash 路由 + 模块导航
-│       ├── api.ts                # JSON API 客户端
-│       ├── pages/{Ctrl}Page.tsx  # 每模块页面（列表/受控表单/分页/删除确认）
-│       └── ui.css                # 样式（与 SSR app.css 同源）
-├── www/app.css            # SSR 静态样式（server docroot 服务）
-└── data/app.db            # SQLite 库（运行后生成）
+│       ├── main.tsx / App.tsx    # entry + hash router + module nav
+│       ├── api.ts                # JSON API client
+│       ├── pages/{Ctrl}Page.tsx  # per-module page (list/controlled form/pagination/delete confirm)
+│       └── ui.css                # styles (same source as the SSR app.css)
+├── www/app.css            # SSR static styles (served by the server docroot)
+└── data/app.db            # SQLite database (created at runtime)
 ```
 
-## 运行生成的项目
+## Running the generated project
 
-`make run`（或 `make base`）输出的即**以 lume 为底的可运行项目**，运行时只需 lume-core 二进制 ≥ 0.7.0（生成的 lume 模块用到 0.7.0 引入的三元运算符，0.6.0 会解析失败；自带 `server`/`route`/`run`、`sql_query`/`sql_write` 内建、docroot 静态与 `:name` 动态路由）：
+What `make run` (or `make base`) emits is **a runnable project built on lume**; the runtime needs only the lume-core binary ≥ 0.7.0 (the generated lume modules use the ternary operator introduced in 0.7.0 — 0.6.0 fails to parse it; it ships `server`/`route`/`run`, built-in `sql_query`/`sql_write`, docroot static serving and `:name` dynamic routes):
 
 ```bash
 cd gen
 
-# lume-core 二进制（从 lume-core 仓库 make 得 bin/lume-core）
+# lume-core binary (built from the lume-core repo with make -> bin/lume-core)
 lume-core app.lume
 
-# React 前端（主 UI）：make run 已自动完成 gen/web 的 pnpm install，
-# 只有改了 web 依赖才需要手动重装；dev/build 直接可用
+# React frontend (the main UI): make run already runs pnpm install for gen/web;
+# only re-install manually if you change web dependencies; dev/build work as-is
 cd web
-pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
+pnpm dev            # http://localhost:5173, /api proxied by Vite to lume :8081
 ```
 
-- 首次启动自动建表（`CREATE TABLE IF NOT EXISTS`，SQLite 文件 `data/app.db`；`env NSGM_DB` 可换库文件；内建仅支持 SQLite）
-- **schema 演进自动迁移**：改字段后重新生成，旧库中已存在的表会自动 `ALTER TABLE ADD COLUMN` 补齐缺失列（裸类型、旧行读作 NULL），旧数据不丢、启动不报 `no such column`；自增主键列不参与补齐
-- server 块从环境变量读取 `PORT` / `HOST` / `WORKERS`（未设置时默认 `8081` / `127.0.0.1` / `4`；需默认解释器后端，Docker 构建已强制 `HAVE_LLVM=0`），例如 `PORT=9000 lume-core app.lume`
-- **React 前端（主 UI）**： `pnpm dev` 起在 :5173，每模块生成 `<Ctrl>Page.tsx`（搜索/分页/受控表单/删除 confirm/时间列 `fmtTime` 本地化），hash 路由导航；`pnpm build && pnpm preview` 即生产预览（同样带 /api 代理，免 CORS）
-- SSR 回退页面： http://localhost:8081/ → 各模块列表页（搜索/新增/编辑/删除均为 SSR 表单，无需 JS）
-- JSON API： `GET /api/{module}?page=0&pageSize=20&q=关键字`、`GET /api/{module}/:id`、`POST /api/{module}`（JSON body 新增）、`POST /api/{module}/update/:id`、`POST /api/{module}/delete/:id`（React 前端消费的正是这套 API）
-- 在 lume-nsgm 根目录可 `make serve`（读 `.env` 的 `LUME_BIN`，默认 `lume-core`）
+- Tables are created automatically on first start (`CREATE TABLE IF NOT EXISTS`, SQLite file `data/app.db`; override the file with `env NSGM_DB`; SQLite is the only built-in backend)
+- **Automatic schema-evolution migration**: after changing fields and regenerating, tables that already exist in the old database automatically get the missing columns added via `ALTER TABLE ADD COLUMN` (bare types; existing rows read as NULL) — no data loss, no `no such column` on startup; auto-increment primary key columns are excluded
+- The server block reads `PORT` / `HOST` / `WORKERS` from the environment (defaults when unset: `8081` / `127.0.0.1` / `4`; the interpreter backend is required — the Docker build forces `HAVE_LLVM=0`), e.g. `PORT=9000 lume-core app.lume`
+- **React frontend (the main UI)**: `pnpm dev` serves on :5173 with a generated `<Ctrl>Page.tsx` per module (search/pagination/controlled form/delete confirm/`fmtTime` localized time columns), hash-router navigation; `pnpm build && pnpm preview` gives a production preview (same /api proxy, no CORS)
+- SSR fallback pages: http://localhost:8081/ → per-module list pages (search/create/edit/delete are all SSR forms, no JS needed)
+- JSON API: `GET /api/{module}?page=0&pageSize=20&q=keyword`, `GET /api/{module}/:id`, `POST /api/{module}` (JSON body insert), `POST /api/{module}/update/:id`, `POST /api/{module}/delete/:id` (this is exactly the API the React frontend consumes)
+- From the lume-nsgm root you can also `make serve` (reads `LUME_BIN` from `.env`, defaulting to `lume-core`)
 
-> 说明：SSR 表单设计为 GET 提交（`req.query_params` 已 URL 解码，可直接读）；
-> 程序化写操作走 POST + JSON body（`json()` 解析）。搜索输入中的 `%` / `_`
-> 按字面转义（`LIKE ? ESCAPE "\"`），不会被当作通配符。API 行为由
-> `make test-e2e` 固化回归（SSR/静态/CRUD/动态路由/搜索/通配符转义/分页/
-> qs_int 兜底/旧库迁移）。
+> Note: SSR forms are designed for GET submission (`req.query_params` is already URL-decoded and can be read directly); programmatic writes go through POST + JSON body (`json()` parsing). `%` / `_` in search input are escaped literally (`LIKE ? ESCAPE "\"`) and never treated as wildcards. API behavior is locked in by `make test-e2e` (SSR/static/CRUD/dynamic routes/search/wildcard escaping/pagination/qs_int fallback/legacy-database migration).
 
-## Docker 部署
+## Docker deployment
 
-把**生成的全栈应用**（lume-core 后端 + React 前端 + SQLite）打成一个镜像，
-`docker compose up --build` 即可在 `:18081` 跑起来（容器端口 18081，>10000，避开常用低位端口）。镜像在构建期做的事：
+Package **the generated full-stack application** (lume-core backend + React frontend + SQLite) into a single image; `docker compose up --build` brings it up on `:18081` (container port 18081, >10000, clear of common low ports). At build time the image:
 
-1. 从 `lume-core` 源码编译 `lume-core` 二进制（含 SQLite 后端，探测 `libsqlite3` 自动编入）；
-2. 用该二进制跑生成器 `main.lume example-config.json` **确定性重新生成** `gen/`；
-3. `pnpm` 构建 React 前端（产物以相对 `base` 挂到 `/spa/`），由 lume-core 的 docroot 静态托管。
+1. Compiles the `lume-core` binary from `lume-core` source (with the SQLite backend, auto-enabled when `libsqlite3` is detected);
+2. Runs the generator `main.lume example-config.json` with that binary to **deterministically regenerate** `gen/`;
+3. Builds the React frontend with `pnpm` (output mounted at `/spa/` with a relative base), served as static files by lume-core's docroot.
 
-> 构建上下文必须是 `work/lume`（`lume-core` 与 `lume-nsgm` 的父目录），
-> 因为 Dockerfile 要同时拿到 lume-core 源码与生成器源码。配套文件已备好：
-> `Dockerfile` / `docker-compose.yml` / `docker-build.sh`，以及 Makefile 的 `docker-*` 命令。
+> The build context must be `work/lume` (the parent directory of `lume-core` and `lume-nsgm`), because the Dockerfile needs both the lume-core source and the generator source. Companion files are provided: `Dockerfile` / `docker-compose.yml` / `docker-build.sh`, plus the Makefile's `docker-*` commands.
 
 ```bash
-# 方式一：Makefile（推荐，自动处理构建上下文、端口与数据卷）
-make docker-build     # 构建镜像（编译 lume-core + 重新生成 + 构建前端）
-make docker-up        # 后台启动（首次自动 --build），宿主端口默认 18081
-make docker-logs      # 跟踪日志
-make docker-ps        # 查看容器状态
-make docker-down      # 停止并移除容器（数据卷 nsgm-data 保留）
-make docker-clean     # 停止并删除容器 + 数据卷（清空数据，谨慎）
+# Option 1: Makefile (recommended — handles build context, ports and the data volume automatically)
+make docker-build     # build the image (compile lume-core + regenerate + build the frontend)
+make docker-up        # start in the background (--build on first run), host port defaults to 18081
+make docker-logs      # follow the logs
+make docker-ps        # show container status
+make docker-down      # stop and remove the container (the nsgm-data volume is kept)
+make docker-clean     # stop and remove the container + volume (wipes data — careful)
 
-# 宿主端口可覆盖（容器内始终监听 18081）：
+# Override the host port (the container always listens on 18081):
 make docker-up DOCKER_PORT=19090
 
-# 方式二：compose 直调
+# Option 2: compose directly
 cd lume-nsgm
-docker compose up --build          # 首次构建（编译 lume-core + 重新生成 + 构建前端）
-docker compose up -d              # 后台运行
-docker compose down               # 停止并移除容器（数据卷 nsgm-data 保留）
+docker compose up --build          # first build (compile lume-core + regenerate + build the frontend)
+docker compose up -d              # run in the background
+docker compose down               # stop and remove the container (the nsgm-data volume is kept)
 
-# 方式三：脚本（自动定位父目录作为构建上下文）
-./docker-build.sh                 # 产出镜像 lume-nsgm-app:latest
+# Option 3: script (locates the parent directory as the build context automatically)
+./docker-build.sh                 # produces the image lume-nsgm-app:latest
 docker run --rm -p 18081:18081 -v lume-nsgm-data:/app/data lume-nsgm-app:latest
 ```
 
-访问（端口默认 18081，可用 `DOCKER_PORT` 覆盖宿主端口）：
+Access (port defaults to 18081; override the host port with `DOCKER_PORT`):
 
-- 首页 / SSR 页面： `http://localhost:18081/`
-- React SPA（主 UI）： `http://localhost:18081/spa/`（hash 路由，API 走同源 `/api`）
-- REST API： `http://localhost:18081/api/<module>`
+- Home / SSR pages: `http://localhost:18081/`
+- React SPA (the main UI): `http://localhost:18081/spa/` (hash router, same-origin `/api`)
+- REST API: `http://localhost:18081/api/<module>`
 
-容器内配置（compose 的 `environment` 段，生成工程从 env 读取，容器端口固定 18081）：
+In-container configuration (the compose `environment` section; the generated project reads these from env, container port fixed at 18081):
 
-| 变量 | 容器内值 | 含义 |
+| Variable | In-container value | Meaning |
 |---|---|---|
-| `PORT` | `18081` | 服务监听端口（>10000，避开常用低位端口） |
-| `HOST` | `0.0.0.0` | 绑定地址（lume-core 默认 `127.0.0.1`，容器内必须放通） |
-| `WORKERS` | `1` | prefork worker 数（Linux 下多 worker 偶发初始化不一致） |
-| `NSGM_DB` | `/app/data/app.db` | SQLite 数据文件路径 |
+| `PORT` | `18081` | listen port (>10000, clear of common low ports) |
+| `HOST` | `0.0.0.0` | bind address (lume-core defaults to `127.0.0.1`; containers must open up) |
+| `WORKERS` | `1` | prefork worker count (multiple workers occasionally hit init inconsistencies on Linux) |
+| `NSGM_DB` | `/app/data/app.db` | SQLite data file path |
 
-- **健康检查**：compose 带 `healthcheck`（每 30s 探 `GET /`，两种构建配置的工程都有该路由，`docker compose ps` 可见 `healthy`）
-- **schema 演进**：改字段后重新 `make docker-build`，容器重启时自动 `ALTER TABLE ADD COLUMN` 补齐缺失列，数据卷里的旧数据不丢
-- **支付变体构建**：`docker build --build-arg NSGM_CONFIG=example-paypal.json -t lume-nsgm-app:paypal .`（构建上下文同 `work/lume`）——镜像内跑的是带 PayPal 支付路由的生成工程，client_secret 等敏感项仍走环境变量注入（`PAYPAL_KEY` 等），不进镜像层
+- **Health check**: compose ships a `healthcheck` (probes `GET /` every 30s; both build configurations have that route, so `docker compose ps` shows `healthy`)
+- **Schema evolution**: after changing fields, re-run `make docker-build`; on container restart the missing columns are added automatically via `ALTER TABLE ADD COLUMN` and old data in the volume is preserved
+- **Payment variant build**: `docker build --build-arg NSGM_CONFIG=example-paypal.json -t lume-nsgm-app:paypal .` (same `work/lume` build context) — the image runs the generated project with PayPal payment routes; sensitive items such as client_secret are still injected via environment variables (`PAYPAL_KEY` etc.) and never baked into the image layer
 
-数据持久化：SQLite 文件落在容器内 `/app/data/app.db`，已挂为命名卷 `nsgm-data`
-（可用环境变量 `NSGM_DB` 覆盖路径）。
+Data persistence: the SQLite file lives at `/app/data/app.db` inside the container, mounted as the named volume `nsgm-data` (override the path with the `NSGM_DB` environment variable).
 
-## 支付（PayPal Express Checkout，沙箱 mock 全链路）
+## Payment (PayPal Express Checkout, full sandbox-mock chain)
 
-在普通 CRUD 生成能力之上，nsgm 可生成**带支付闭环的电商工程**：下单 → 跳转
-approve → 回调捕获 → 订单状态流转。用法是换一份带 `pay` 段的配置
-（`example-paypal.json`）：
+On top of the plain CRUD generation, nsgm can generate **e-commerce projects with a closed payment loop**: place an order → redirect to approve → callback capture → order status transitions. The usage is to swap in a config with a `pay` section (`example-paypal.json`):
 
 ```bash
 lume-core main.lume example-paypal.json
-PAYPAL_KEY=<沙箱密钥> lume-core gen/app.lume
+PAYPAL_KEY=<sandbox secret> lume-core gen/app.lume
 python3 scripts/mock_pay_gateway.py --port 18097
 ```
 
-> mock 网关默认凭证（应用侧与网关侧必须对齐，否则认证失败）：
-> `MOCK_PAYPAL_CLIENT_ID=AUmock_client_id_sandbox_001` /
-> `MOCK_PAYPAL_CLIENT_SECRET=e2e-mock-key`（对应配置 `client_id` 与
-> `PAYPAL_KEY`）。换值需两边同时改。
+> Default mock gateway credentials (the app side and the gateway side must match, or authentication fails): `MOCK_PAYPAL_CLIENT_ID=AUmock_client_id_sandbox_001` / `MOCK_PAYPAL_CLIENT_SECRET=e2e-mock-key` (corresponding to the config's `client_id` and `PAYPAL_KEY`). Changing values requires changing both sides.
 
-配置的 `pay` 段（`lib/validate.lume` 的 `validate_pay` 全量校验）：
+The `pay` section of the config (fully validated by `validate_pay` in `lib/validate.lume`):
 
-| 键 | 含义 |
+| Key | Meaning |
 |---|---|
-| `client_id` | 公开标识（沙箱 `AU...`），写进配置无妨；进 `Authorization` 头 |
-| `secret_env` | **client_secret 的环境变量名**（如 `PAYPAL_KEY`）——生成代码 `env("<name>")` 读取，密钥不写进配置与产物 |
-| `mode` | `sandbox` / `live`（决定 `api-m.sandbox.paypal.com` 还是 `api-m.paypal.com`） |
-| `order_module` / `order_no_field` / `amount_field` / `status_field` | 订单表与字段绑定（四个名字必须已定义） |
-| `webhook_path` | 可选，异步事件路由（默认不生成；配置后生成 `post "<webhook_path>"`） |
-| `currency` / `currency_symbol` / `brand` | 可选，默认 `USD` / `$` / `lume-nsgm`；`currency_symbol` 决定店面 / 后台 / 收银台 / 回跳页的金额符号（已改为配置驱动，原先硬编码 `$`） |
+| `client_id` | public identifier (sandbox `AU...`); safe to commit; goes into the `Authorization` header |
+| `secret_env` | **the environment variable name holding client_secret** (e.g. `PAYPAL_KEY`) — generated code reads it via `env("<name>")`, so the secret never enters the config or the output |
+| `mode` | `sandbox` / `live` (selects `api-m.sandbox.paypal.com` vs `api-m.paypal.com`) |
+| `order_module` / `order_no_field` / `amount_field` / `status_field` | order table and field bindings (all four names must already be defined) |
+| `webhook_path` | optional async event route (not generated by default; when configured, a `post "<webhook_path>"` route is generated) |
+| `currency` / `currency_symbol` / `brand` | optional; default `USD` / `$` / `lume-nsgm`; `currency_symbol` drives the amount symbol on the storefront / admin / cashier / return pages (now config-driven instead of the previously hardcoded `$`) |
 
-> ⚠️ **`secret_env` 取名避坑**：lume-core 的 `env()` 会**掩码**名字含
-> `API_KEY` / `SECRET` / `PASSWORD` / `PASSWD` / `TOKEN` / `CREDENTIAL` 子串（大小写
-> 不敏感）的变量——读到的是 null，与未设置同形（`src/builtins_fs.c` 的
-> `env_is_sensitive`，防止脚本外泄凭证）。所以 PayPal 用 `PAYPAL_KEY`；
-> **不要**叫 `PAYPAL_CLIENT_SECRET`（PayPal e2e 曾因此 401：空 secret 过 Basic
-> 校验失败）。
+> ⚠️ **Naming pitfall for `secret_env`**: lume-core's `env()` **masks** variables whose names contain the substrings `API_KEY` / `SECRET` / `PASSWORD` / `PASSWD` / `TOKEN` / `CREDENTIAL` (case-insensitive) — reading them yields null, indistinguishable from unset (`env_is_sensitive` in `src/builtins_fs.c`, a guard against scripts leaking credentials). Hence PayPal uses `PAYPAL_KEY`; **do not** call it `PAYPAL_CLIENT_SECRET` (a PayPal e2e run once 401'd because an empty secret failed Basic auth).
 
-生成工程比普通工程多四条路由 + 一个 `lib/pay.lume`：
+A generated payment project has four extra routes plus a `lib/pay.lume`:
 
-- `POST /api/pay/create`：读订单 → `pay.paypal_token`（OAuth2 `client_credentials`
-  取 Bearer，模块级缓存约 8h）→ `pay.paypal_create`（`POST /v2/checkout/orders`，
-  intent=CAPTURE）→ 返回 JSON `{ ok, approve_url, paypal_order_id }`（前端据此跳转）
-- `GET /api/pay/return`：从 `req.query_params` 取 `token` 与 `order_no` → `pay.paypal_capture`
-  （`POST .../capture`）→ 改 `status` 为 `paid`（幂等，已 paid 直接回成功页；
-  捕获成功回填 `paypal_order_id` + `capture_id`）
-- `GET /api/pay/cancel`：用户取消，返回取消页
-- `POST /api/pay/webhook`（可选）：`pay.paypal_verify_webhook` 简化 HMAC 验签
+- `POST /api/pay/create`: read the order → `pay.paypal_token` (OAuth2 `client_credentials` for a Bearer token, module-level cache ~8h) → `pay.paypal_create` (`POST /v2/checkout/orders`, intent=CAPTURE) → return JSON `{ ok, approve_url, paypal_order_id }` (the frontend redirects accordingly)
+- `GET /api/pay/return`: read `token` and `order_no` from `req.query_params` → `pay.paypal_capture` (`POST .../capture`) → set `status` to `paid` (idempotent; already-paid returns the success page directly; backfills `paypal_order_id` + `capture_id` on capture success)
+- `GET /api/pay/cancel`: user cancelled; returns the cancel page
+- `POST /api/pay/webhook` (optional): `pay.paypal_verify_webhook` simplified HMAC verification
 
-`lib/pay.lume` 导出的纯函数（`tests/t7.lume` 已知向量固化）：
+Pure functions exported by `lib/pay.lume` (locked in as known-answer vectors by `tests/t7.lume`):
 
 ```lume
 pay.paypal_base_url(mode)              // sandbox/live → base URL
-pay.paypal_basic_auth(id, secret)     // "Basic " + base64(id:secret)（RFC7617）
-pay.paypal_fmt_cents(cents)           // 整数分 → "x.xx"（无浮点）
-pay.fmt_cents(cents)                  // 金额展示别名（店面/后台通用）
+pay.paypal_basic_auth(id, secret)     // "Basic " + base64(id:secret) (RFC7617)
+pay.paypal_fmt_cents(cents)           // integer cents → "x.xx" (no floats)
+pay.fmt_cents(cents)                  // amount display alias (storefront/admin shared)
 pay.paypal_token(cfg)                 // OAuth2 client_credentials → { ok, token }
 pay.paypal_create(cfg, token, no, cents, desc, ret, cancel) // → { ok, approve_url, paypal_order_id }
-pay.paypal_approve_url(cfg, ppid)     // 由订单 ID 重建 approve 链接（收银台复用）
+pay.paypal_approve_url(cfg, ppid)     // rebuild the approve URL from the order ID (cashier reuse)
 pay.paypal_capture(cfg, token, pp_order_id)                   // → { ok, status, capture_id }
-pay.paypal_get_order(cfg, token, pp_order_id)                 // 查单（退款反查 capture_id 兜底）
-pay.paypal_get_capture(cfg, token, capture_id)                // 查捕获（订单 GET 404 后的兜底：related_ids.order_id 反解订单号）
-pay.paypal_refund(cfg, token, capture_id, cents, note)        // 退款（捕获级）
+pay.paypal_get_order(cfg, token, pp_order_id)                 // get order (refund capture_id fallback)
+pay.paypal_get_capture(cfg, token, capture_id)                // get capture (fallback after an order GET 404: related_ids.order_id reverses the order number)
+pay.paypal_refund(cfg, token, capture_id, cents, note)        // refund (capture-level)
 pay.paypal_verify_webhook(secret, id, ts, body, sign_hex)    // HMAC(id\n+ts\n+body\n)
 ```
 
-已知边界（详见 TODO.md S7）：
+Known boundaries (details in TODO.md S7):
 
-- **webhook 验签简化**：真实 PayPal webhook 签名含 `crc32(body)`（core 暂无 crc32
-  内建），本库 `paypal_verify_webhook` 为纯 HMAC 沙箱等价实现；验签三要素
-  （`verify_id` / `verify_ts` / `verify_sign`）随 body 传递
-- **return 走 query_params**：PayPal 跳回带 `?token=...`，`req.query_params` 已
-  URL 解码可直接读（同 SSR 表单约定）；创建时把本地 `order_no` 编码进 `return_url`
-  本身，避免服务端存 PayPal 订单 ID → 本地单号映射
-- **OAuth2 比 SHA256-RSA 易内嵌**：PayPal 的 HTTP Basic 凭证只需 `base64_encode`
-  内建，这是选 PayPal 作为支付通道的动因
-- **无随机源**：业务单号由生成器派生（`order_no + now()`），沙箱够用
-- **重复退款 422 的 issue 编码不唯一**（2026-10-17 真实沙箱实证）：已全额退的捕获
-  再退返回 `CAPTURE_FULLY_REFUNDED`（文档/旧 mock 写的 `ALREADY_REFUNDED` 反而
-  不出现），`paypal_refund` 对 `ALREADY_REFUNDED` / `CAPTURE_FULLY_REFUNDED` /
-  `REFUND_ALREADY_EXISTS` / `DUPLICATE` 一并按成功对账，避免「其实已退成功」
-  显示成假失败
-- **订单号 ≠ 交易号**：PayPal 后台的「交易号 / Transaction ID」是**捕获 ID**，
-  当订单号填进 `GET /v2/checkout/orders/{id}` 会回 404
-  `RESOURCE_NOT_FOUND`/`INVALID_RESOURCE_ID`（2026-10-17 真实沙箱实证）——
-  退款路由订单反查 404 后自动改查 `GET /v2/payments/captures/{id}`，用
-  `supplementary_data.related_ids.order_id` 反解真实订单号，两列都回填正确值
+- **Simplified webhook verification**: real PayPal webhook signatures include `crc32(body)` (core has no crc32 builtin yet); this library's `paypal_verify_webhook` is a pure-HMAC sandbox-equivalent implementation; the three verification elements (`verify_id` / `verify_ts` / `verify_sign`) travel with the body
+- **return via query_params**: PayPal redirects back with `?token=...`, and `req.query_params` is already URL-decoded and directly readable (same convention as SSR forms); at creation time the local `order_no` is encoded into the `return_url` itself, avoiding a server-side PayPal-order-ID → local-order-number mapping table
+- **OAuth2 is easier to inline than SHA256-RSA**: PayPal's HTTP Basic credentials only need the `base64_encode` builtin — the reason PayPal was chosen as the payment channel
+- **No random source**: business order numbers are derived by the generator (`order_no + now()`), sufficient for the sandbox
+- **The 422 issue code for duplicate refunds is not unique** (empirically confirmed against the real sandbox on 2026-10-17): refunding an already fully refunded capture returns `CAPTURE_FULLY_REFUNDED` (the `ALREADY_REFUNDED` written in the docs and the old mock never appears); `paypal_refund` reconciles `ALREADY_REFUNDED` / `CAPTURE_FULLY_REFUNDED` / `REFUND_ALREADY_EXISTS` / `DUPLICATE` as success alike, so "already refunded" never shows up as a false failure
+- **Order number ≠ transaction number**: the "Transaction ID" in the PayPal dashboard is the **capture ID**; entering it as the order number makes `GET /v2/checkout/orders/{id}` return 404 `RESOURCE_NOT_FOUND`/`INVALID_RESOURCE_ID` (empirically confirmed against the real sandbox on 2026-10-17) — after an order reverse-lookup 404, the refund route automatically retries against `GET /v2/payments/captures/{id}`, reverses the real order number via `supplementary_data.related_ids.order_id`, and backfills both columns with the correct values
 
-回归：`make test` 含 t7（PayPal 已知向量 / validate_pay / 字段 default）；
-`make test-e2e` 固化 PayPal 沙箱全链路——建单 → approve_url → return 捕获 →
-`status:"paid"` → 重复 return 幂等 → webhook 验签 → 收银台复用防孤儿单 →
-退款与库存回补 → **早期订单双空关联 ID 恢复**（`need_recover` 提示 → `/shop/recover/:ono`
-表单 `capid` 直达 / `ppid` 反查 / `manual` 本地标记 / **交易号（捕获 ID）填进订单号框
-自动改查捕获接口**四条路径均落库 `refunded`）→ **商品目录示例播种与清空重载**
-（空表自动播种 → `?act=clear` 清空且订单不受影响 → 不自动复活 → `?act=seed` 手动重载 →
-非空守卫）。
+Regression: `make test` includes t7 (PayPal known-answer vectors / validate_pay / field defaults); `make test-e2e` locks in the full PayPal sandbox chain — create → approve_url → return capture → `status:"paid"` → idempotent repeat return → webhook verification → cashier reuse against orphan orders → refund and stock restock → **early-order recovery with both association IDs empty** (`need_recover` hint → the `/shop/recover/:ono` form's `capid` direct route / `ppid` reverse lookup / `manual` local marking / **transaction number (capture ID) typed into the order-number field, auto-retried against the capture endpoint** — all four paths end with `refunded` persisted) → **product catalog example seeding and clear-and-reload** (empty table auto-seeds → `?act=clear` clears without touching orders → no auto-resurrection → `?act=seed` manual reload → non-empty guard).
 
-### 店面（shop 段，面向顾客的电商前端）
+### Storefront (the shop section, customer-facing e-commerce UI)
 
-pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay` 同时配置）后，生成
-工程多出一套面向顾客的 SSR 店面（导航多「商城」入口）：
+`pay` solves "collect the money", `shop` solves "sell the goods": with a `shop` section configured (alongside `pay`), the generated project gains a customer-facing SSR storefront (the nav gets a "Shop" entry):
 
-| 路由 | 行为 |
+| Route | Behavior |
 |---|---|
-| `get /shop` | 商品卡片列表（名称/价格 分→元/描述/库存）；**新库空表一次性播种演示商品**（配了 `stock_field` 时播 10/5/0 三档，直接演示售罄态），可在后台 `<product_module>` 里增删改。页内带「**清空商品**」按钮（confirm 后走 `?act=clear`，逐行参数化删——`sql_write` 护栏禁无 WHERE 的 DELETE；订单记录不受影响）；清空后落「已播种」标记（`_nsgm_shop_meta` 元表），**不再自动复活**，空态给出「载入示例商品」（`?act=seed`，仅空表时播种）。清空/重载并回本路由不单独占路由位：lume-core 解释器路由表上限 32 条（`MAX_AL_ROUTES`），PayPal 变体已逼近 |
-| `get /shop/buy/:id?ik=` | 下单扣库存（补偿模式，见下）→ 跳收银台；`ik` 幂等键防重复下单 |
-| `get /shop/pay/:ono` | 收银台：**复用**订单已存的 `paypal_order_id` 重建 approve 链接——重复渲染不重复建单（防孤儿单） |
-| `get /shop/result/:ono` | 支付结果页（paid → 成功并显示金额；pending → 继续支付） |
-| `get /shop/refund/:ono` | 退款：确认页 `?confirm=1` 执行；仅 `paid` 可退、重复退幂等；**网关退款成功后回补库存 +1**。关联 ID 归一（`paypal_order_id`/`capture_id` SQL NULL 读作 lume null 先归一）；旧单缺 `capture_id` 时由 `pay.paypal_get_order` 反查兜底——订单 GET 404（填的是交易号/捕获 ID）自动改查 `pay.paypal_get_capture`，反解真实订单号后继续退款 |
-| `get /shop/recover/:ono` | **早期订单恢复关联 ID**（迁移补列前 `paypal_order_id` 与 `capture_id` 均 NULL 的早期订单）：订单号框填 PayPal 订单号**或交易号（捕获 ID，自动识别）**反查捕获记录，或直接填捕获 ID（直达退款），或标记「已在 PayPal 后台手动退款」本地落库（不调 API）。退款成功回填关联 ID（反解出的真实订单号 + 捕获 ID），使后续操作一致 |
+| `get /shop` | Product card list (name / price / description / stock); **one-time demo seeding on an empty table** (with `stock_field` configured, seeds 10/5/0 so the sold-out state is demonstrated directly), manageable via the admin `<product_module>`. The page carries a **"Clear products"** button (after confirm, `?act=clear` deletes row by row with parameters — the `sql_write` guard forbids DELETE without WHERE; order records are unaffected); after clearing, a "seeded" marker is left in the `_nsgm_shop_meta` meta table so it **never auto-resurrects**, and the empty state offers "Load example products" (`?act=seed`, seeds only when the table is empty). Clear/reload returns to this route without consuming extra route slots: the lume-core interpreter's route table caps at 32 entries (`MAX_AL_ROUTES`), and the PayPal variant was already close |
+| `get /shop/buy/:id?ik=` | Place an order and deduct stock (compensation mode, see below) → redirect to the cashier; `ik` is the idempotency key against duplicate orders |
+| `get /shop/pay/:ono` | Cashier: **reuses** the order's stored `paypal_order_id` to rebuild the approve URL — repeated renders never create duplicate orders (no orphans) |
+| `get /shop/result/:ono` | Payment result page (paid → success with the amount; pending → continue payment) |
+| `get /shop/refund/:ono` | Refund: confirmation page, `?confirm=1` executes; only `paid` is refundable, duplicate refunds are idempotent; **stock is restored +1 after a successful gateway refund**. Association IDs are normalized (`paypal_order_id`/`capture_id` SQL NULL reads as lume null and is normalized first); when an old order lacks `capture_id`, `pay.paypal_get_order` reverse-lookup serves as fallback — an order GET 404 (i.e. a transaction/capture ID was entered) automatically retries `pay.paypal_get_capture`, reverses the real order number, and proceeds with the refund |
+| `get /shop/recover/:ono` | **Recover association IDs for early orders** (early orders whose `paypal_order_id` and `capture_id` are both NULL because they predate the migration columns): enter the PayPal order number **or the transaction number (capture ID, auto-detected)** in the order-number field to reverse-lookup the capture record, or enter the capture ID directly (straight to refund), or mark "already refunded manually in the PayPal dashboard" to persist locally (no API call). On refund success the association IDs are backfilled (the reversed real order number + the capture ID), keeping subsequent operations consistent |
 
-配置（`example-paypal.json`）：
+Configuration (`example-paypal.json`):
 
 ```json
 "shop": {
@@ -404,31 +365,19 @@ pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay`
 }
 ```
 
-`validate_shop`（lib/validate.lume）校验：product_module 必须已定义；name/price
-字段必须真实存在；`stock_field` 依赖 `product_field`（回补库存要凭订单行定位商品行）；
-`product_field` / `product_name_field` 必须在 `pay.order_module` 已定义且形状合法。
-店面下单写的就是 pay 段绑定的订单表，回调复用支付接线的验签/幂等/落库逻辑——
-**店面与支付共享同一条状态流转链路**。
+`validate_shop` (lib/validate.lume) checks: product_module must be defined; name/price fields must actually exist; `stock_field` depends on `product_field` (restocking stock needs the order row to locate the product row); `product_field` / `product_name_field` must be defined on `pay.order_module` and well-shaped. Storefront orders write to the same order table bound by the `pay` section, and callbacks reuse the payment wiring's verification/idempotency/persistence logic — **the storefront and the payment flow share one status-transition pipeline**.
 
-**下单扣库存（补偿模式，TODO P1-2）**：无事务（S2）下按
-① INSERT 订单（含 `product_id` / `product_name` 商品快照，配了字段时）
-② `UPDATE product SET stock = stock - 1 WHERE id = ? AND stock >= 1`（单条原子语句即库存守卫，
-`sql_write` 返回受影响行数，0 = 售罄/并发被抢）
-③ 0 行则补偿 DELETE 该 pending 单并返回「已售罄」页（按钮同时置灰不可点）。
-选 INSERT-first 而非先扣后建：守卫 UPDATE 才是原子库存操作，且避免「货扣了单没建」的悬挂。
-配了 `product_field` 时，同 `ik` 的重复下单复用最近一笔 pending 单（不依赖唯一索引）。
+**Order-time stock deduction (compensation mode, TODO P1-2)**: without transactions (S2), the sequence is
+① INSERT the order (with the `product_id` / `product_name` product snapshot, when the fields are configured)
+② `UPDATE product SET stock = stock - 1 WHERE id = ? AND stock >= 1` (a single atomic statement doubles as the stock guard; `sql_write` returns the affected row count, 0 = sold out / lost a race)
+③ on 0 rows, compensate by DELETEing the pending order and returning a "sold out" page (the button is also greyed out and unclickable).
+INSERT-first rather than deduct-then-create: the guard UPDATE is the atomic stock operation, and it avoids the dangling state of "stock deducted but no order". With `product_field` configured, a duplicate order with the same `ik` reuses the most recent pending order (no unique index required).
 
-**PayPal 收银台复用（防孤儿单）**：`/shop/pay/:ono` 每次渲染时，若订单已有
-`paypal_order_id` 就直接按订单 ID 重建 approve 链接（mock 网关：
-`{gateway}/mock/paypal/approve?token=<订单ID>`；真实：
-`https://{www|www.sandbox}.paypal.com/checkoutnow?token=<订单ID>`），不再调建单接口；
-建单成功即把 `paypal_order_id` 回填订单行（该列由自动迁移补出）。
+**PayPal cashier reuse (no orphan orders)**: on every render of `/shop/pay/:ono`, if the order already has a `paypal_order_id`, the approve URL is rebuilt directly from the order ID (mock gateway: `{gateway}/mock/paypal/approve?token=<order ID>`; real: `https://{www|www.sandbox}.paypal.com/checkoutnow?token=<order ID>`) without calling the create-order endpoint; on create-order success the `paypal_order_id` is backfilled onto the order row (that column is added by the automatic migration).
 
-**迁移注意**：旧库升级后 `product.stock` 列为 SQL NULL——lume 侧 `str(null)` 是字面量
-`"null"` 而非空串（店面商品卡 / 后台列表 / 表单预填均已做归一，不会渲染出 `null`），
-但**演示商品要在后台把库存补上**，否则购买会被守卫 UPDATE 判 0 行拒单。
+**Migration note**: after upgrading an old database, the `product.stock` column is SQL NULL — on the lume side `str(null)` is the literal string `"null"` rather than an empty string (storefront product cards / admin lists / form prefills all normalize this, so `null` never renders), but **demo products need their stock filled in from the admin**, or purchases will be rejected by the guard UPDATE with 0 rows.
 
-## 字段定义（example-config.json）
+## Field definitions (example-config.json)
 
 ```json
 {
@@ -441,31 +390,31 @@ pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay`
         { "name": "id", "type": "integer", "required": true, "primary": true, "auto": true,
           "system": true, "showInList": true, "showInForm": false, "searchable": false, "comment": "ID" },
         { "name": "name", "type": "varchar", "length": 255, "required": true,
-          "showInList": true, "showInForm": true, "searchable": true, "comment": "姓名" }
+          "showInList": true, "showInForm": true, "searchable": true, "comment": "Name" }
       ]
     }
   ]
 }
 ```
 
-支持类型：`varchar` / `text` / `integer` / `decimal` / `boolean` / `date` / `datetime` / `timestamp`。
-字段属性：`required` / `primary` / `auto` / `system` / `showInList` / `showInForm` / `searchable` / `comment` / `length`。
+Supported types: `varchar` / `text` / `integer` / `decimal` / `boolean` / `date` / `datetime` / `timestamp`.
+Field attributes: `required` / `primary` / `auto` / `system` / `showInList` / `showInForm` / `searchable` / `comment` / `length`.
 
-## M2 状态
+## M2 status
 
-已完成（M1 6 个核心生成器 + M2 两项缺口）：
-- **lume-core `read_stdin()` 内建**：`read_stdin()` 读一行（去换行）、`read_stdin("all")` 读全部，EOF/空输入返回 `""`，为 init 交互命令铺路
-- **模板渲染引擎 `lib/tpl.lume`**：语法 `{{var}}`（点路径）、`{{#each list as it}}...{{/each}}`（支持指令行内联每行模板）、`{{#if path}}...{{else}}...{{/if}}`（行内 if，可嵌套）；生成器从字符串拼接迁移到 `templates/*.tpl` 模板渲染
-- **init 交互命令**：stdin 逐行录入字段后生成（`make init MODULE=product`）
+Completed (M1's six core generators + M2's two gaps):
+- **lume-core `read_stdin()` builtin**: `read_stdin()` reads one line (newline stripped), `read_stdin("all")` reads everything, EOF/empty input returns `""` — paving the way for the interactive init command
+- **Template rendering engine `lib/tpl.lume`**: syntax `{{var}}` (dot paths), `{{#each list as it}}...{{/each}}` (supports inlining per-line templates via directives), `{{#if path}}...{{else}}...{{/if}}` (line-level if, nestable); the generator migrated from string concatenation to `templates/*.tpl` template rendering
+- **Interactive init command**: field entry via stdin, one per line, then generate (`make init MODULE=product`)
 
-暂不含（后续迭代）：文件上传、CSV 导出、i18n 多语言完整集成、字段级自定义校验函数（当前校验集中在 schema 层 `validate.lume`，生成物内只做必填 / 类型基础校验）。
+Not included yet (future iterations): file upload, CSV export, full i18n integration, field-level custom validators (validation currently lives at the schema layer in `validate.lume`; generated artifacts only enforce required / basic type checks).
 
-## 与 lume-core 的关系
+## Relationship with lume-core
 
-lume-nsgm 是 lume 语言的**第一个真实业务级应用**（生成器领域），同时反向驱动 lume-core 补内建：
-- P0：`json` 解码、`argv()`、递归 `files()`
-- P4a：字符串内建 `upper/lower/capitalize/trim/contains/split/join/substr`
-- M1 修复：`join()` 字符串元素 verbatim（无 JSON 引号）、空列表 join 返回 `""` 而非 `null`
-- M2：`read_stdin()` 内建（stdin 交互输入）；模板引擎踩坑：`split("}}")` 会切开 `{{else}}`/`{{/if}}` 需重组、`head` 是保留字、`fbool` 需同时兼容 bool true 与数字 1
-- 基座切换（core ≥ 0.7.0）：自包含 SQLite 内建（`sql_query`/`sql_write`）、`json()` 双向、docroot 静态服务、`:name` 动态路由
-- 语言特性（core 0.7.0）：**三元运算符**（惰性求值、贴邻消歧）——生成模板中 `q != "" ? ... : ...` 这类 UI 条件渲染的直接驱动力
+lume-nsgm is lume's **first real business-grade application** (in the generator space), and it drives lume-core to add builtins in return:
+- P0: `json` decoding, `argv()`, recursive `files()`
+- P4a: string builtins `upper/lower/capitalize/trim/contains/split/join/substr`
+- M1 fixes: `join()` passes string elements through verbatim (no JSON quoting); join of an empty list returns `""` instead of `null`
+- M2: `read_stdin()` builtin (interactive stdin input); template engine pitfalls: `split("}}")` cuts through `{{else}}`/`{{/if}}` and needs reassembly, `head` is a reserved word, `fbool` must accept both bool true and the number 1
+- Base switch (core ≥ 0.7.0): self-contained SQLite builtins (`sql_query`/`sql_write`), bidirectional `json()`, docroot static serving, `:name` dynamic routes
+- Language feature (core 0.7.0): **the ternary operator** (lazy evaluation, adjacency disambiguation) — the direct driver behind UI conditional rendering like `q != "" ? ... : ...` in generated templates

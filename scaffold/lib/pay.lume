@@ -5,7 +5,7 @@
 //   OAuth2 的 HTTP Basic 凭证 base64(client_id:client_secret) 用到 lume-core
 //   0.7.0+ 的 base64_encode 内建。
 //
-// 已知边界（沙箱等价实现，详见 README「支付」节与 TODO S7）：
+// 已知边界（沙箱等价实现，详见 README「支付 / Payment」节与 TODO S7）：
 //   - webhook 验签为纯 HMAC 简化版：真实 PayPal webhook 签名含 crc32(body)，
 //     core 暂无 crc32 内建 ⇒ 验签材料（verify_id / verify_ts / verify_sign）
 //     随 JSON body 传递（沙箱约定）；
