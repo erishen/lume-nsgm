@@ -4,7 +4,7 @@
 
 **An AI-friendly, deterministic CRUD generation layer**: feed it module field definitions (JSON schema) and it emits a full-stack CRUD project built on lume (SQLite storage + SSR pages + REST API + React frontend), run by a single `lume-core` binary.
 
-> Positioning: lume-nsgm replaces **nsgm's generator and CLI layer**. The output shape evolves from Next.js/Express + GraphQL + Antd into a **lume-core application** (`server`/`route`/`run` + built-in `sql_query`/`sql_write` + docroot static serving + `:name` dynamic routes, core ≥ 0.7.0), with zero Node dependencies; the generator itself is likewise interpreted by lume-core.
+> Positioning: lume-nsgm replaces **[nsgm](https://github.com/erishen/nsgm)'s generator and CLI layer** — [nsgm](https://github.com/erishen/nsgm) is the original full-stack framework (Next.js + Express + GraphQL + MySQL, published on npm as `nsgm-cli`); this project ports its generator layer onto [lume-core](https://github.com/erishen/lume-core), with zero Node dependencies. The output shape evolves from Next.js/Express + GraphQL + Antd into a **lume-core application** (`server`/`route`/`run` + built-in `sql_query`/`sql_write` + docroot static serving + `:name` dynamic routes, core ≥ 0.7.0); the generator itself is likewise interpreted by lume-core.
 
 ## Why it still matters in the AI era
 

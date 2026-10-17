@@ -4,7 +4,7 @@
 
 **AI-friendly 的确定性 CRUD 生成层**：输入模块字段定义（JSON schema），输出一套**以 lume 为底**的全栈 CRUD 工程（SQLite 存储 + SSR 页面 + REST API + React 前端），`lume-core` 单二进制一条命令运行。
 
-> 定位：lume 替代的是 **nsgm 的生成器与 CLI 层**，产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume-core 应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建 + docroot 静态 + `:name` 动态路由，core ≥ 0.7.0），零 Node 依赖；生成器侧同样用 lume-core 解释执行。
+> 定位：lume-nsgm 替代的是 **[nsgm](https://github.com/erishen/nsgm) 的生成器与 CLI 层**——[nsgm](https://github.com/erishen/nsgm) 是原版全栈框架（Next.js + Express + GraphQL + MySQL，npm 包名 `nsgm-cli`）；本项目把它的生成器层移植到 [lume-core](https://github.com/erishen/lume-core) 上，零 Node 依赖。产物形态从 Next.js/Express + GraphQL + Antd 演进为 **lume-core 应用**（`server`/`route`/`run` + `sql_query`/`sql_write` 内建 + docroot 静态 + `:name` 动态路由，core ≥ 0.7.0）；生成器侧同样用 lume-core 解释执行。
 
 ## 为什么 AI 时代还需要它
 
