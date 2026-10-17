@@ -1,5 +1,4 @@
 gen/
-gen-pay/
 gen-paypal/
 __pycache__/
 *.pyc
