@@ -82,92 +82,8 @@ export func gen_ui(out: string, mods, shop): int {
   return 0;
 }
 
-// 生成支付接线块（config.pay 存在时注入 app.lume）：
-//   PAY_CFG（密钥走 env）+ post /api/pay/create + post <notify_path> 两条路由。
-// 表名/列名/notify_path 均已过 validate.lume 白名单（标识符/路径形状校验），
-// 可安全拼进生成的 SQL 与路由字符串；商户标识限令牌字符集（见 validate_pay）。
-// 微信：gw/appid/mchid/serial 默认取配置，可分别被 PAY_GATEWAY/PAY_APPID/
-// PAY_MCHID/PAY_SERIAL env 覆盖（compose 同名单注入）；密钥走 secret_env。
-// PayPal：client_id 默认取配置，可被 PAYPAL_CLIENT_ID env 覆盖；secret 走 secret_env。
-func gen_pay_block(pay): string {
-  let provider = str(get(pay, "provider", "wechat"));
-  if (provider == "paypal") { return gen_paypal_block(pay); }
-  let gw = str(get(pay, "gateway", ""));
-  let appid = str(get(pay, "appid", ""));
-  let mchid = str(get(pay, "mchid", ""));
-  let serial = str(get(pay, "serial_no", ""));
-  let secret_env = str(get(pay, "secret_env", "PAY_SECRET"));
-  let om = str(get(pay, "order_module", ""));
-  let onf = str(get(pay, "order_no_field", "order_no"));
-  let amf = str(get(pay, "amount_field", "amount_cents"));
-  let stf = str(get(pay, "status_field", "status"));
-  let np = str(get(pay, "notify_path", "/api/pay/notify"));
-  if (np == "") { np = "/api/pay/notify"; }
-  let dflt_notify = "http://127.0.0.1:8081" + np;
-  // SQL 片段（双引号标识符在生成文件里是 \"，故此处用 \\\"）
-  let sel_amt = "SELECT \\\"" + amf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
-  let sel_st = "SELECT \\\"" + stf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
-  let upd_st = "UPDATE \\\"" + om + "\\\" SET \\\"" + stf + "\\\" = 'paid' WHERE \\\"" + onf + "\\\" = ?";
-  let b = "// ---- 支付接线（lume-nsgm 生成；密钥从环境变量 " + secret_env + " 注入，勿硬编码）----\n"
-    + "// 与真实微信支付 v3 的差距：签名为 HMAC-SHA256（真实为 SHA256-RSA，需签名\n"
-    + "// sidecar 或 core 补 RSA 内建）；回调验签头 core 未暴露（req 无 headers），\n"
-    + "// 故签名材料随 body 传递（沙箱约定）。详见 README「支付」节。\n"
-    + "let PAY_SECRET_RAW = env(\"" + secret_env + "\");\n"
-    + "let PAY_NOTIFY_RAW = env(\"PAY_NOTIFY_URL\");\n"
-    + "let PAY_GATEWAY_RAW = env(\"PAY_GATEWAY\");\n"
-    + "let PAY_APPID_RAW = env(\"PAY_APPID\");\n"
-    + "let PAY_MCHID_RAW = env(\"PAY_MCHID\");\n"
-    + "let PAY_SERIAL_RAW = env(\"PAY_SERIAL\");\n"
-    + "let PAY_CFG = {\n"
-    + "  \"gw\": (PAY_GATEWAY_RAW != null && PAY_GATEWAY_RAW != \"\" ? str(PAY_GATEWAY_RAW) : \"" + gw + "\"),\n"
-    + "  \"appid\": (PAY_APPID_RAW != null && PAY_APPID_RAW != \"\" ? str(PAY_APPID_RAW) : \"" + appid + "\"),\n"
-    + "  \"mchid\": (PAY_MCHID_RAW != null && PAY_MCHID_RAW != \"\" ? str(PAY_MCHID_RAW) : \"" + mchid + "\"),\n"
-    + "  \"serial\": (PAY_SERIAL_RAW != null && PAY_SERIAL_RAW != \"\" ? str(PAY_SERIAL_RAW) : \"" + serial + "\"),\n"
-    + "  \"secret\": (PAY_SECRET_RAW != null ? str(PAY_SECRET_RAW) : \"\")\n"
-    + "};\n"
-    + "let PAY_NOTIFY_URL = (PAY_NOTIFY_RAW != null && PAY_NOTIFY_RAW != \"\") ? str(PAY_NOTIFY_RAW) : \"" + dflt_notify + "\";\n\n"
-    + "post \"" + np + "\", func(req) {\n"
-    + "  if (get(req, \"body\", null) == null) { return pay.notify_fail(\"empty body\"); }\n"
-    + "  let data = json(req.body);\n"
-    + "  if (data == null) { return pay.notify_fail(\"invalid json\"); }\n"
-    + "  // 沙箱约定：签名材料随 body（真实 v3 走 Wechatpay-* 响应头，见 S7）\n"
-    + "  let ts = str(get(data, \"verify_ts\", \"\"));\n"
-    + "  let nonce = str(get(data, \"verify_nonce\", \"\"));\n"
-    + "  let sign = str(get(data, \"verify_sign\", \"\"));\n"
-    + "  let payload = str(get(data, \"payload\", \"\"));\n"
-    + "  if (!pay.verify_notify(str(get(PAY_CFG, \"secret\", \"\")), ts, nonce, payload, sign)) {\n"
-    + "    return pay.notify_fail(\"signature mismatch\");\n"
-    + "  }\n"
-    + "  let evt = json(payload);\n"
-    + "  if (evt == null) { return pay.notify_fail(\"invalid payload\"); }\n"
-    + "  let order_no = str(get(evt, \"out_trade_no\", \"\"));\n"
-    + "  if (order_no == \"\") { return pay.notify_fail(\"missing out_trade_no\"); }\n"
-    + "  // 幂等：仅 pending -> paid；重复通知（已流转）回 SUCCESS，防网关重试风暴\n"
-    + "  let cur = sql_query(db.dsn(), \"" + sel_st + "\", [order_no]);\n"
-    + "  if (len(cur) > 0 && str(get(cur[0], \"" + stf + "\", \"\")) == \"paid\") { return pay.notify_ok(); }\n"
-    + "  sql_write(db.dsn(), \"" + upd_st + "\", [order_no]);\n"
-    + "  return pay.notify_ok();\n"
-    + "};\n\n"
-    + "post \"/api/pay/create\", func(req) {\n"
-    + "  if (get(req, \"body\", null) == null) { return { \"status\": 400, \"body\": { \"err\": \"empty body\" } }; }\n"
-    + "  let data = json(req.body);\n"
-    + "  if (data == null) { return { \"status\": 400, \"body\": { \"err\": \"invalid json body\" } }; }\n"
-    + "  let order_no = str(get(data, \"order_no\", \"\"));\n"
-    + "  if (order_no == \"\") { return { \"status\": 400, \"body\": { \"err\": \"missing order_no\" } }; }\n"
-    + "  let rows = sql_query(db.dsn(), \"" + sel_amt + "\", [order_no]);\n"
-    + "  if (len(rows) == 0) { return { \"status\": 404, \"body\": { \"err\": \"order not found\" } }; }\n"
-    + "  let cents = int(get(rows[0], \"" + amf + "\", 0));\n"
-    + "  let r = pay.create_native(PAY_CFG, order_no, cents, \"订单 \" + order_no, PAY_NOTIFY_URL);\n"
-    + "  if (get(r, \"ok\", false) != true) {\n"
-    + "    return { \"status\": 502, \"body\": { \"err\": \"gateway error\", \"detail\": str(get(r, \"err\", \"\")) } };\n"
-    + "  }\n"
-    + "  return { \"status\": 200, \"body\": { \"ok\": true, \"code_url\": str(get(r, \"code_url\", \"\")) } };\n"
-    + "};\n";
-  return b;
-}
-
-// PayPal 支付接线块（provider: paypal）：OAuth2 建单 + 跳转 + 返回捕获。
-// 与微信同口径：client_id 来自配置（公开标识），client_secret 走 env（secret_env），
+// PayPal 支付接线块：OAuth2 建单 + 跳转 + 返回捕获。
+// client_id 来自配置（公开标识），client_secret 走 env（secret_env），
 // gw 可被 PAY_GATEWAY 覆盖，return/cancel 基址走 PAYPAL_RETURN_URL（默认 127.0.0.1:8081）。
 // 创建接口返回 JSON { ok, approve_url, paypal_order_id }（前端据此 window.location 跳转）；
 // PayPal 跳回 return?token=<pp_order_id>&order_no=<本地单号> 后服务端捕获并改状态。
@@ -183,6 +99,7 @@ func gen_paypal_block(pay): string {
   let amf = str(get(pay, "amount_field", "amount_cents"));
   let stf = str(get(pay, "status_field", "status"));
   let currency = str(get(pay, "currency", "USD"));
+  let csym = str(get(pay, "currency_symbol", "$"));
   let brand = str(get(pay, "brand", "lume-nsgm"));
   let wpath = str(get(pay, "webhook_path", ""));
   let dflt_ret = "http://127.0.0.1:8081";
@@ -192,6 +109,7 @@ func gen_paypal_block(pay): string {
   let capf = str(get(pay, "capture_id_field", "capture_id"));
   // SQL 片段（双引号标识符在生成文件里是 \"，故此处用 \\\"）
   let sel_amt = "SELECT \\\"" + amf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
+  let sel_st_amt = "SELECT \\\"" + stf + "\\\", \\\"" + amf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
   let sel_st = "SELECT \\\"" + stf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
   let upd_paid_ids = "UPDATE \\\"" + om + "\\\" SET \\\"" + stf + "\\\" = 'paid', \\\"" + ppidf + "\\\" = ?, \\\"" + capf + "\\\" = ? WHERE \\\"" + onf + "\\\" = ?";
   let b = "// ---- PayPal 支付接线（lume-nsgm 生成；client_id 来自配置，client_secret 走环境变量 " + secret_env + "）----\n"
@@ -210,7 +128,8 @@ func gen_paypal_block(pay): string {
     + "  \"currency\": \"" + currency + "\",\n"
     + "  \"brand\": \"" + brand + "\"\n"
     + "};\n"
-    + "let PAYPAL_RETURN_BASE = (PAYPAL_RETURN_RAW != null && PAYPAL_RETURN_RAW != \"\") ? str(PAYPAL_RETURN_RAW) : \"" + dflt_ret + "\";\n\n"
+    + "let PAYPAL_RETURN_BASE = (PAYPAL_RETURN_RAW != null && PAYPAL_RETURN_RAW != \"\") ? str(PAYPAL_RETURN_RAW) : \"" + dflt_ret + "\";\n"
+    + "let csym = \"" + csym + "\";\n\n"
     // ---- post /api/pay/create：建单，返回 approve_url（前端跳转）----
     + "post \"/api/pay/create\", func(req) {\n"
     + "  if (get(req, \"body\", null) == null) { return { \"status\": 400, \"body\": { \"err\": \"empty body\" } }; }\n"
@@ -234,9 +153,13 @@ func gen_paypal_block(pay): string {
     + "  let order_no = str(get(req.query_params, \"order_no\", \"\"));\n"
     + "  let pptoken = str(get(req.query_params, \"token\", \"\"));\n"
     + "  if (order_no == \"\" || pptoken == \"\") { return ui.page(\"支付返回\", \"\", \"<p>参数缺失</p>\"); }\n"
-    + "  let cur = sql_query(db.dsn(), \"" + sel_st + "\", [order_no]);\n"
-    + "  if (len(cur) > 0 && str(get(cur[0], \"" + stf + "\", \"\")) == \"paid\") {\n"
-    + "    return ui.page(\"支付成功\", \"shop\", \"<div class=\\\"panel\\\"><h1>支付成功 <span class=\\\"badge\\\">PayPal</span></h1><p>订单 <code>\" + ui.esc(order_no) + \"</code> 已支付。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(order_no) + \"\\\">申请退款</a></p></div>\");\n"
+    + "  let cur = sql_query(db.dsn(), \"" + sel_st_amt + "\", [order_no]);\n"
+    + "  // 订单存在性检查：未知单号不进捕获流程（否则捕获成功也只会 UPDATE 0 行，\n"
+    + "  // 却给用户看成功页——PayPal 侧真实扣过款的单对不上本地单的事故路径）\n"
+    + "  if (len(cur) == 0) { return ui.page(\"支付失败\", \"shop\", \"<div class=\\\"panel\\\"><h1>支付失败 <span class=\\\"badge\\\">PayPal</span></h1><div class=\\\"flash err\\\">订单 \" + ui.esc(order_no) + \" 不存在</div><p><a class=\\\"btn ghost\\\" href=\\\"/shop\\\">返回商城</a></p></div>\"); }\n"
+    + "  let cents = int(get(cur[0], \"" + amf + "\", 0));\n"
+    + "  if (str(get(cur[0], \"" + stf + "\", \"\")) == \"paid\") {\n"
+    + "    return ui.page(\"支付成功\", \"shop\", \"<div class=\\\"panel\\\"><h1>支付成功 <span class=\\\"badge\\\">PayPal</span></h1><p>订单 <code>\" + ui.esc(order_no) + \"</code> · 金额 <strong>\" + csym + \"\" + pay.fmt_cents(cents) + \"</strong> 已支付。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(order_no) + \"\\\">申请退款</a></p></div>\");\n"
     + "  }\n"
     + "  let tk = pay.paypal_token(PAYPAL_CFG);\n"
     + "  if (get(tk, \"ok\", false) != true) { return ui.page(\"支付失败\", \"shop\", \"<div class=\\\"panel\\\"><h1>支付失败 <span class=\\\"badge\\\">PayPal</span></h1><p>获取 PayPal 令牌失败。</p><p><a class=\\\"btn primary\\\" href=\\\"/api/pay/return?order_no=\" + ui.esc(order_no) + \"&amp;token=\" + ui.esc(pptoken) + \"\\\">重试</a> <a class=\\\"btn ghost\\\" href=\\\"/shop\\\">返回商城</a></p></div>\"); }\n"
@@ -245,7 +168,7 @@ func gen_paypal_block(pay): string {
     + "  // 回填 PayPal 侧 ID（paypal_order_id=approve token，capture_id=捕获记录）——退款路由凭 capture_id 退；\n"
     + "  // 422 已捕获对账路径 capture_id 为空，退款时由 shop/refund 的 paypal_get_order 反查兜底。\n"
     + "  sql_write(db.dsn(), \"" + upd_paid_ids + "\", [pptoken, str(get(cap, \"capture_id\", \"\")), order_no]);\n"
-    + "  return ui.page(\"支付成功\", \"shop\", \"<div class=\\\"panel\\\"><h1>支付成功 <span class=\\\"badge\\\">PayPal</span></h1><p>订单 <code>\" + ui.esc(order_no) + \"</code> 已支付。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(order_no) + \"\\\">申请退款</a></p></div>\");\n"
+    + "  return ui.page(\"支付成功\", \"shop\", \"<div class=\\\"panel\\\"><h1>支付成功 <span class=\\\"badge\\\">PayPal</span></h1><p>订单 <code>\" + ui.esc(order_no) + \"</code> · 金额 <strong>\" + csym + \"\" + pay.fmt_cents(cents) + \"</strong> 已支付。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(order_no) + \"\\\">申请退款</a></p></div>\");\n"
     + "};\n\n"
     // ---- get /api/pay/cancel：用户取消 ----
     + "get \"/api/pay/cancel\", func(req) {\n"
@@ -270,29 +193,21 @@ func gen_paypal_block(pay): string {
 }
 
 // 生成店面接线块（config.shop 存在且 pay 非 null 时注入 app.lume）：
-//   get /shop（商品列表，空表自动播种演示数据）+ get /shop/buy/:id（下单 pending）
-//   + get /shop/pay/:ono（收银台：微信 code_url / PayPal approve_url）
-//   + get /shop/mock-pay/:ono（仅微信：让 mock 网关代投递签名回调，demo 专用）
-//   + get /shop/result/:ono（支付结果）。
-// 依赖同一 app.lume 里支付接线块的模块级 PAY_CFG/PAY_NOTIFY_URL（微信）或
-// PAYPAL_CFG/PAYPAL_RETURN_BASE（PayPal），故 shop 必须与 pay 同时配置。
-// 生成店面接线块（config.shop 存在且 pay 非 null 时注入 app.lume）：
-//   get /shop（商品列表，空表自动播种演示数据）+ /shop/buy/:id（下单 pending）
-//   + /shop/pay/:ono（收银台：微信 code_url / PayPal approve_url）
-//   + /shop/mock-pay/:ono（仅微信：mock 网关代投递签名回调，demo 专用）
+//   get /shop（商品列表；新库空表一次性播种示例商品，页内带「清空商品」按钮；
+//   ?act=clear 清空目录并落标记不再自动复活 / ?act=seed 手动重载示例——并回本路由
+//   不占额外路由位：lume-core 解释器路由表上限 32 条，PayPal 变体已逼近）
+//   + /shop/buy/:id（下单 pending）
+//   + /shop/pay/:ono（收银台：PayPal approve_url，已建单则复用不重建）
 //   + /shop/result/:ono（支付结果）
 //   + /shop/refund/:ono（退款：确认页 ?confirm=1 执行；仅 paid 可退，重复退幂等）。
-// 依赖同一 app.lume 里支付接线块的模块级 PAY_CFG/PAY_NOTIFY_URL（微信）或
-// PAYPAL_CFG/PAYPAL_RETURN_BASE（PayPal），故 shop 必须与 pay 同时配置。
+// 依赖同一 app.lume 里支付接线块的模块级 PAYPAL_CFG/PAYPAL_RETURN_BASE，
+// 故 shop 必须与 pay 同时配置。
 // 产物级模板写好后由 replace() 注入配置标识符（均过 validate 白名单），
 // 避免逐行手写双层转义（曾在此踩坑：get(p, \"name\") 多一层反斜杠）。
 export func gen_shop_block(shop, pay): string {
-  let provider = str(get(pay, "provider", "wechat"));
-  // 店面 UI 必须明示支付渠道与币种：徽标文案 __PN__ 与价格符号 __CUR__ 随 provider 走
-  // （PayPal 变体此前列表页也打 ¥，与收银台 $ 自相矛盾）。
-  let pname = "微信支付";
-  let pcur = "¥";
-  if (provider == "paypal") { pname = "PayPal"; pcur = "$"; }
+  // 店面 UI 明示支付渠道与币种：徽标文案 __PN__ 与价格符号 __CUR__（PayPal，$ 计价）
+  let pname = "PayPal";
+  let pcur = str(get(pay, "currency_symbol", "$"));
   let pm = str(get(shop, "product_module", "product"));
   let nf = str(get(shop, "name_field", "name"));
   let pf = str(get(shop, "price_field", "price_cents"));
@@ -305,6 +220,96 @@ export func gen_shop_block(shop, pay): string {
   let capf = str(get(pay, "capture_id_field", "capture_id"));
   let sel_ref = "SELECT \\\"" + stf + "\\\", \\\"" + amf + "\\\", \\\"" + ppidf + "\\\", \\\"" + capf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ?";
   let upd_refunded = "UPDATE \\\"" + om + "\\\" SET \\\"" + stf + "\\\" = 'refunded' WHERE \\\"" + onf + "\\\" = ?";
+  // 收银台建单后立即回填 PayPal 订单 ID（捕获时的 return 处理器也回填，但那是
+  // 用户 approve 之后的事——不回填的话刷新一次收银台就多一笔 PayPal 孤儿单）
+  let upd_ppid = "UPDATE \\\"" + om + "\\\" SET \\\"" + ppidf + "\\\" = ? WHERE \\\"" + onf + "\\\" = ?";
+  // 退款回补关联 ID（早期订单缺列时手动/反查补齐后写回，使后续操作一致）
+  let upd_ppid_cap = "UPDATE \\\"" + om + "\\\" SET \\\"" + ppidf + "\\\" = ?, \\\"" + capf + "\\\" = ? WHERE \\\"" + onf + "\\\" = ?";
+  // 商品快照/库存（可选，P1-2 收口；三个键均经 validate_shop 校验存在性）：
+  //   prdf  订单行商品 id 列——无 ik 购买时复用该商品 pending 单、退款回补库存靠它定位
+  //   pnmf  订单行商品名快照列——下单时定格商品名，订单后台直接可见「买了什么」
+  //   skf   商品行库存列——buy 守卫扣减（0 行=售罄）、refund 回补；依赖 prdf
+  let prdf = str(get(shop, "product_field", ""));
+  let pnmf = str(get(shop, "product_name_field", ""));
+  let skf = str(get(shop, "stock_field", ""));
+  let has_pref = prdf != "";
+  let has_stock = skf != "" && prdf != "";
+  // 库存扣减/回补/pending 单查询/补偿删单（标识符均过白名单，直拼进生成的 SQL）
+  let dec_stock = "UPDATE \\\"" + pm + "\\\" SET \\\"" + skf + "\\\" = \\\"" + skf + "\\\" - 1 WHERE \\\"id\\\" = ? AND \\\"" + skf + "\\\" >= 1";
+  let inc_stock = "UPDATE \\\"" + pm + "\\\" SET \\\"" + skf + "\\\" = \\\"" + skf + "\\\" + 1 WHERE \\\"id\\\" = ?";
+  // 手动退款（已在 PayPal 后台退）本地标记时回补库存的分支尾（has_stock 才有）
+  let refund_manual_tail = "";
+  if (has_stock) {
+    refund_manual_tail = ""
+      + "    let rpid_s = str(get(o, \"" + prdf + "\", \"\"));\n"
+      + "    if (rpid_s == \"null\" || rpid_s == \"\") { rpid_s = \"0\"; }\n"
+      + "    if (int(rpid_s) > 0) { sql_write(db.dsn(), \"" + inc_stock + "\", [int(rpid_s)]); }\n";
+  }
+  let sel_pending = "SELECT \\\"" + onf + "\\\" FROM \\\"" + om + "\\\" WHERE \\\"" + prdf + "\\\" = ? AND \\\"" + stf + "\\\" = 'pending' ORDER BY \\\"id\\\" DESC LIMIT 1";
+  let del_pending = "DELETE FROM \\\"" + om + "\\\" WHERE \\\"" + onf + "\\\" = ? AND \\\"" + stf + "\\\" = 'pending'";
+  // 订单 INSERT 的列与值（商品快照列可选加入；status 恒 'pending'）
+  let ocols = "\\\"" + onf + "\\\", \\\"" + amf + "\\\"";
+  let ovals = "?, ?";
+  if (has_pref) { ocols = ocols + ", \\\"" + prdf + "\\\""; ovals = ovals + ", ?"; }
+  if (pnmf != "") { ocols = ocols + ", \\\"" + pnmf + "\\\""; ovals = ovals + ", ?"; }
+  ocols = ocols + ", \\\"" + stf + "\\\"";
+  ovals = ovals + ", 'pending'";
+  let ins_order = "INSERT INTO \\\"" + om + "\\\" (" + ocols + ") VALUES (" + ovals + ")";
+  let ins_params = "ono, int(get(p, \"__PF__\", 0))";
+  if (has_pref) { ins_params = ins_params + ", pid"; }
+  if (pnmf != "") { ins_params = ins_params + ", str(get(p, \"__NF__\", \"\"))"; }
+  // 空表播种的演示商品（配库存列时带库存 10/5/0——0 即售罄演示）
+  let seed_rows = ""
+    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"Lume 机械键盘\", 39900]);\n"
+    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"lume 主题卫衣\", 19900]);\n"
+    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"程序员马克杯\", 5900]);\n";
+  if (has_stock) {
+    seed_rows = ""
+      + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\", \\\"__SKF__\\\") VALUES (?, ?, ?)\", [\"Lume 机械键盘\", 39900, 10]);\n"
+      + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\", \\\"__SKF__\\\") VALUES (?, ?, ?)\", [\"lume 主题卫衣\", 19900, 5]);\n"
+      + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\", \\\"__SKF__\\\") VALUES (?, ?, ?)\", [\"程序员马克杯\", 5900, 0]);\n";
+  }
+  // 一次性播种标记元表（_nsgm_shop_meta）：新库首次访问 /shop 播种示例商品后落标记；
+  // 此后商品被清空（/shop/clear）或在后台删空都不会自动复活——否则「清空」会被
+  // 下一次访问覆盖、按钮形同虚设。需要时走 /shop/seed 手动重新载入。
+  let meta_ddl = "CREATE TABLE IF NOT EXISTS \\\"_nsgm_shop_meta\\\" (\\\"k\\\" TEXT PRIMARY KEY, \\\"v\\\" TEXT)";
+  let meta_sel = "SELECT \\\"v\\\" FROM \\\"_nsgm_shop_meta\\\" WHERE \\\"k\\\" = 'seeded'";
+  let meta_mark = "INSERT OR REPLACE INTO \\\"_nsgm_shop_meta\\\" (\\\"k\\\", \\\"v\\\") VALUES ('seeded', '1')";
+  // 逐行删（sql_write 护栏：UPDATE/DELETE 必须带 WHERE，禁整表 DELETE——按 id 参数化删）
+  let del_one = "DELETE FROM \\\"__PM__\\\" WHERE \\\"id\\\" = ?";
+  // 商品卡注入件：库存声明/库存展示行/购买按钮（配库存列才非空；detail 兼做 NULL 归一）
+  let card_stk = "";
+  let card_stk_line = "";
+  let card_buy = "      + \"<a class=\\\"btn primary\\\" href=\\\"/shop/buy/\" + str(get(p, \"id\", 0)) + \"?ik=\" + ik + \"\\\">购买</a></div>\\n\";\n";
+  if (has_stock) {
+    card_stk = "    let stk_s = str(get(p, \"__SKF__\", \"\"));\n"
+      + "    if (stk_s == \"null\" || stk_s == \"\") { stk_s = \"0\"; }\n"
+      + "    let stk = int(stk_s);\n";
+    card_stk_line = "      + \"<p class=\\\"muted\\\">\" + (stk > 0 ? \"库存 \" + str(stk) : \"已售罄\") + \"</p>\\n\"\n";
+    card_buy = "      + (stk > 0 ? \"<a class=\\\"btn primary\\\" href=\\\"/shop/buy/\" + str(get(p, \"id\", 0)) + \"?ik=\" + ik + \"\\\">购买</a>\" : \"<span class=\\\"btn disabled\\\">已售罄</span>\") + \"</div>\\n\";\n";
+  }
+  // 购买路由注入件：无 ik 复用 pending 单（配商品列才行）；库存列配了走补偿扣减
+  let buy_reuse = "  if (ik == \"\") { ik = str(pid) + \"-\" + str(now()); }\n";
+  let buy_stock = "  sql_write(db.dsn(), \"" + ins_order + "\", [" + ins_params + "]);\n";
+  if (has_pref) {
+    buy_reuse = "  // 无 ik（直接打开购买链接）时复用该商品最近一笔 pending 单：列表每次渲染都生成\n"
+      + "  // 新 ik，不带 ik 的重复购买会各建各的单——复用让防重复下单不依赖 ik\n"
+      + "  if (ik == \"\") {\n"
+      + "    let pend = sql_query(db.dsn(), \"" + sel_pending + "\", [pid]);\n"
+      + "    if (len(pend) > 0) { return shop_cashier(str(get(pend[0], \"" + onf + "\", \"\"))); }\n"
+      + "    ik = str(pid) + \"-\" + str(now());\n"
+      + "  }\n";
+  }
+  if (has_stock) {
+    buy_stock = "  // 下单扣库存（补偿模式，P1-2）：先建单，再在 stock >= 1 守卫内原子扣减；\n"
+      + "  // 0 行 = 售罄或并发被抢——补偿删除本笔 pending 单并提示，货与单不脱节\n"
+      + "  sql_write(db.dsn(), \"" + ins_order + "\", [" + ins_params + "]);\n"
+      + "  let n = sql_write(db.dsn(), \"" + dec_stock + "\", [pid]);\n"
+      + "  if (n == 0) {\n"
+      + "    sql_write(db.dsn(), \"" + del_pending + "\", [ono]);\n"
+      + "    return ui.page(\"商城\", \"shop\", \"<div class=\\\"panel\\\"><h1>商城 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">「\" + ui.esc(str(get(p, \"__NF__\", \"\"))) + \"」已售罄</div><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">返回商城</a></p></div>\");\n"
+      + "  }\n";
+  }
   let t = ""
     + "// ---- 店面（lume-nsgm 生成：商品列表 -> 下单 -> 收银台 -> 结果页）----\n"
     + "// 幂等：渲染商品列表时为每个商品附带 ik（幂等 Key）。下单 GET /shop/buy/:id?ik= 复用同一笔 pending 单，\n"
@@ -329,54 +334,98 @@ export func gen_shop_block(shop, pay): string {
     + "  if (str(get(o, \"__STF__\", \"\")) == \"paid\") { return shop_result(ono); }\n"
     + "  let cents = int(get(o, \"__AMF__\", 0));\n"
   ;
-  if (provider == "paypal") {
     t = t + ""
-    + "  let tk = pay.paypal_token(PAYPAL_CFG);\n"
-    + "  if (get(tk, \"ok\", false) != true) {\n"
-    + "    return ui.page(\"支付\", \"shop\", \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">PayPal</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk, \"err\", \"\"))) + \"</div><p><a class=\\\"btn ghost\\\" href=\\\"/shop\\\">返回商城</a></p></div>\");\n"
+    + "  // 收银台复用：订单行已回填 paypal_order_id（本次或此前渲染建过单）时直接\n"
+    + "  // 重建 approve 链接，不再向 PayPal 重复建单——否则刷新/重试会留下孤儿单。\n"
+    + "  // SQL NULL（迁移补列旧单）读出是 lume null，str(null) 得字面量 \"null\"，先归一。\n"
+    + "  let ppid = str(get(o, \"" + ppidf + "\", \"\"));\n"
+    + "  if (ppid == \"null\") { ppid = \"\"; }\n"
+    + "  let approve = \"\";\n"
+    + "  if (ppid != \"\") {\n"
+    + "    approve = pay.paypal_approve_url(PAYPAL_CFG, ppid);\n"
+    + "  } else {\n"
+    + "    let tk = pay.paypal_token(PAYPAL_CFG);\n"
+    + "    if (get(tk, \"ok\", false) != true) {\n"
+    + "      return ui.page(\"支付\", \"shop\", \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">PayPal</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk, \"err\", \"\"))) + \"</div><p><a class=\\\"btn ghost\\\" href=\\\"/shop\\\">返回商城</a></p></div>\");\n"
+    + "    }\n"
+    + "    let return_url = PAYPAL_RETURN_BASE + \"/api/pay/return?order_no=\" + ono;\n"
+    + "    let cancel_url = PAYPAL_RETURN_BASE + \"/api/pay/cancel?order_no=\" + ono;\n"
+    + "    let r = pay.paypal_create(PAYPAL_CFG, str(get(tk, \"token\", \"\")), ono, cents, \"Shop order \" + ono, return_url, cancel_url);\n"
+    + "    if (get(r, \"ok\", false) != true) {\n"
+    + "      return ui.page(\"支付\", \"shop\", \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">PayPal</span></h1><div class=\\\"flash err\\\">支付网关错误：\" + ui.esc(str(get(r, \"err\", \"\"))) + \"</div><p><a href=\\\"/shop/pay/\" + ono + \"\\\">重试</a></p></div>\");\n"
+    + "    }\n"
+    + "    approve = str(get(r, \"approve_url\", \"\"));\n"
+    + "    // 建单成功即回填 PayPal 订单 ID：后续渲染复用同一笔，不在 PayPal 侧堆孤儿单\n"
+    + "    sql_write(db.dsn(), \"" + upd_ppid + "\", [str(get(r, \"paypal_order_id\", \"\")), ono]);\n"
     + "  }\n"
-    + "  let return_url = PAYPAL_RETURN_BASE + \"/api/pay/return?order_no=\" + ono;\n"
-    + "  let cancel_url = PAYPAL_RETURN_BASE + \"/api/pay/cancel?order_no=\" + ono;\n"
-    + "  let r = pay.paypal_create(PAYPAL_CFG, str(get(tk, \"token\", \"\")), ono, cents, \"Shop order \" + ono, return_url, cancel_url);\n"
-    + "  if (get(r, \"ok\", false) != true) {\n"
-    + "    return ui.page(\"支付\", \"shop\", \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">PayPal</span></h1><div class=\\\"flash err\\\">支付网关错误：\" + ui.esc(str(get(r, \"err\", \"\"))) + \"</div><p><a href=\\\"/shop/pay/\" + ono + \"\\\">重试</a></p></div>\");\n"
-    + "  }\n"
-    + "  let body = \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">__PN__</span></h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> · 金额 <strong>$\" + pay.fmt_cents(cents) + \"</strong></p>\\n\"\n"
-    + "    + \"<p><a class=\\\"btn primary\\\" href=\\\"\" + ui.esc(str(get(r, \"approve_url\", \"\"))) + \"\\\">前往 PayPal 支付</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ono + \"\\\">查询支付结果</a></p></div>\\n\";\n"
+    + "  let body = \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">__PN__</span></h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> · 金额 <strong>__CUR__\" + pay.fmt_cents(cents) + \"</strong></p>\\n\"\n"
+    + "    + \"<p><a class=\\\"btn primary\\\" href=\\\"\" + ui.esc(approve) + \"\\\">前往 PayPal 支付</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ono + \"\\\">查询支付结果</a></p></div>\\n\";\n"
     + "  return ui.page(\"收银台\", \"shop\", body);\n"
       ;
-  } else {
-    t = t + ""
-    + "  let r = pay.create_native(PAY_CFG, ono, cents, \"商城订单 \" + ono, PAY_NOTIFY_URL);\n"
-    + "  if (get(r, \"ok\", false) != true) {\n"
-    + "    return ui.page(\"支付\", \"shop\", \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">支付网关错误：\" + ui.esc(str(get(r, \"err\", \"\"))) + \"</div><p><a href=\\\"/shop/pay/\" + ono + \"\\\">重试</a></p></div>\");\n"
-    + "  }\n"
-    + "  let body = \"<div class=\\\"panel\\\"><h1>收银台 <span class=\\\"badge\\\">__PN__</span></h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> · 金额 <strong>¥\" + pay.fmt_cents(cents) + \"</strong></p>\\n\"\n"
-    + "    + \"<p>微信扫码支付（mock）：</p><p><code>\" + ui.esc(str(get(r, \"code_url\", \"\"))) + \"</code></p>\\n\"\n"
-    + "    + \"<p><a class=\\\"btn primary\\\" href=\\\"/shop/mock-pay/\" + ono + \"\\\">模拟支付成功（demo）</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ono + \"\\\">查询支付结果</a></p></div>\\n\";\n"
-    + "  return ui.page(\"收银台\", \"shop\", body);\n"
-      ;
-  }
   t = t + "}\n"
+    + "// 播种标记元表（一次性语义：清空/后台删空后不自动复活，见 gen_shop_block 的 meta_* 常量）\n"
+    + "func shop_ensure_meta(): int {\n"
+    + "  sql_write(db.dsn(), \"" + meta_ddl + "\", []);\n"
+    + "  return 0;\n"
+    + "}\n"
+    + "func shop_seeded(): int {\n"
+    + "  shop_ensure_meta();\n"
+    + "  return len(sql_query(db.dsn(), \"" + meta_sel + "\", []));\n"
+    + "}\n"
     + "get \"/shop\", func(req) {\n"
+    + "  // act=clear 清空商品目录 / act=seed 手动重载示例——并回本路由，不占额外路由位\n"
+    + "  // （lume-core 解释器路由表上限 32 条，PayPal 变体已逼近，见 TODO P3-14）\n"
+    + "  let act = str(get(req.query_params, \"act\", \"\"));\n"
+    + "  shop_ensure_meta();\n"
+    + "  let seeded = shop_seeded();\n"
+    + "  if (seeded == 0) { sql_write(db.dsn(), \"" + meta_mark + "\", []); }\n"
+    + "  let flash = \"\";\n"
+    + "  if (act == \"clear\") {\n"
+    + "    sql_write(db.dsn(), \"" + meta_mark + "\", []);\n"
+    + "    let allrows = sql_query(db.dsn(), \"SELECT \\\"id\\\" FROM \\\"__PM__\\\"\", []);\n"
+    + "    let ci = 0;\n"
+    + "    while (ci < len(allrows)) {\n"
+    + "      sql_write(db.dsn(), \"" + del_one + "\", [int(get(allrows[ci], \"id\", 0))]);\n"
+    + "      ci = ci + 1;\n"
+    + "    }\n"
+    + "    flash = \"<div class=\\\"flash ok\\\">已清空全部商品（订单记录不受影响，可重新载入示例）。</div>\\n\";\n"
+    + "  }\n"
     + "  let prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" ORDER BY \\\"id\\\"\", []);\n"
-    + "  if (len(prows) == 0) {\n"
-    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"Lume 机械键盘\", 39900]);\n"
-    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"lume 主题卫衣\", 19900]);\n"
-    + "    sql_write(db.dsn(), \"INSERT INTO \\\"__PM__\\\" (\\\"__NF__\\\", \\\"__PF__\\\") VALUES (?, ?)\", [\"程序员马克杯\", 5900]);\n"
+    + "  if (act == \"seed\" && len(prows) == 0) {\n"
+    + seed_rows
+    + "    sql_write(db.dsn(), \"" + meta_mark + "\", []);\n"
+    + "    prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" ORDER BY \\\"id\\\"\", []);\n"
+    + "    flash = \"<div class=\\\"flash ok\\\">示例商品已载入。</div>\\n\";\n"
+    + "  }\n"
+    + "  else if (act == \"seed\") {\n"
+    + "    flash = \"<div class=\\\"flash ok\\\">商品目录非空，未重复载入。</div>\\n\";\n"
+    + "  }\n"
+    + "  // 新库一次性自动播种：无标记且空表（act 必须为空——clear 后标记已在，不会复活）\n"
+    + "  if (act == \"\" && seeded == 0 && len(prows) == 0) {\n"
+    + seed_rows
     + "    prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" ORDER BY \\\"id\\\"\", []);\n"
     + "  }\n"
-    + "  let body = \"<h1>商城</h1>\\n<p class=\\\"muted\\\">支付方式：<span class=\\\"badge\\\">__PN__</span> · 点「购买」下单，收银台完成支付，回调自动落库。</p>\\n<div class=\\\"shop-grid\\\">\\n\";\n"
+    + "  let body = \"<h1>商城</h1>\\n<p class=\\\"muted\\\">支付方式：<span class=\\\"badge\\\">__PN__</span> · 点「购买」下单，收银台完成支付，回调自动落库。</p>\\n\";\n"
+    + "  if (flash != \"\") { body = body + flash; }\n"
+    + "  if (len(prows) == 0) {\n"
+    + "    body = body + \"<div class=\\\"panel\\\"><div class=\\\"flash warn\\\">商品目录为空——可一键载入示例商品预览，或到后台添加自己的商品。</div>\\n<p><a class=\\\"btn primary\\\" href=\\\"/shop?act=seed\\\">载入示例商品</a> <a class=\\\"btn ghost\\\" href=\\\"/__PM__\\\">去后台添加商品</a></p></div>\\n\";\n"
+    + "    return ui.page(\"商城\", \"shop\", body);\n"
+    + "  }\n"
+    + "  body = body + \"<p><a class=\\\"btn ghost\\\" href=\\\"/shop?act=clear\\\" onclick=\\\"return confirm('确定清空全部商品？订单记录不受影响，之后可重新载入示例。')\\\">清空商品</a></p>\\n<div class=\\\"shop-grid\\\">\\n\";\n"
     + "  let i = 0;\n"
     + "  while (i < len(prows)) {\n"
     + "    let p = prows[i];\n"
     + "    let ik = str(get(p, \"id\", 0)) + \"-\" + str(now());\n"
     + "    let thumb = THUMBS[int(get(p, \"id\", 0)) % len(THUMBS)];\n"
+    + card_stk
+    + "    let dtl = str(get(p, \"detail\", \"\"));\n"
+    + "    if (dtl == \"null\") { dtl = \"\"; }\n"
     + "    body = body + \"<div class=\\\"card\\\"><div class=\\\"thumb\\\">\" + thumb + \"</div>\\n\"\n"
     + "      + \"<h3>\" + ui.esc(str(get(p, \"__NF__\", \"\"))) + \"</h3>\\n\"\n"
     + "      + \"<p class=\\\"price\\\">__CUR__\" + pay.fmt_cents(int(get(p, \"__PF__\", 0))) + \"</p>\\n\"\n"
-    + "      + (str(get(p, \"detail\", \"\")) != \"\" ? \"<p class=\\\"muted\\\">\" + ui.esc(str(get(p, \"detail\", \"\"))) + \"</p>\\n\" : \"\")\n"
-    + "      + \"<a class=\\\"btn primary\\\" href=\\\"/shop/buy/\" + str(get(p, \"id\", 0)) + \"?ik=\" + ik + \"\\\">购买</a></div>\\n\";\n"
+    + card_stk_line
+    + "      + (dtl != \"\" ? \"<p class=\\\"muted\\\">\" + ui.esc(dtl) + \"</p>\\n\" : \"\")\n"
+    + card_buy
     + "    i = i + 1;\n"
     + "  }\n"
     + "  body = body + \"</div>\\n\";\n"
@@ -385,17 +434,17 @@ export func gen_shop_block(shop, pay): string {
     + "get \"/shop/buy/:id\", func(req) {\n"
     + "  let pid = db.qs_int(req.params, \"id\", 0);\n"
     + "  let ik = str(get(req.query_params, \"ik\", \"\"));\n"
-    + "  if (ik == \"\") { ik = str(pid) + \"-\" + str(now()); }\n"
-    + "  let ono = \"SHOP-\" + ik;\n"
     + "  let prows = sql_query(db.dsn(), \"SELECT * FROM \\\"__PM__\\\" WHERE \\\"id\\\" = ?\", [pid]);\n"
     + "  if (len(prows) == 0) { return ui.page(\"商城\", \"shop\", \"<div class=\\\"panel\\\"><h1>商城 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">商品不存在</div><p><a href=\\\"/shop\\\">返回商城</a></p></div>\"); }\n"
     + "  let p = prows[0];\n"
+    + buy_reuse
+    + "  let ono = \"SHOP-\" + ik;\n"
     + "  let ex = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
     + "  if (len(ex) > 0) {\n"
     + "    if (str(get(ex[0], \"__STF__\", \"\")) == \"paid\") { ono = ono + \"-r\" + str(now()); }\n"
     + "    else { return shop_cashier(ono); }\n"
     + "  }\n"
-    + "  sql_write(db.dsn(), \"INSERT INTO \\\"__OM__\\\" (\\\"__ONF__\\\", \\\"__AMF__\\\", \\\"__STF__\\\") VALUES (?, ?, 'pending')\", [ono, int(get(p, \"__PF__\", 0))]);\n"
+    + buy_stock
     + "  return shop_cashier(ono);\n"
     + "};\n"
     + "get \"/shop/pay/:ono\", func(req) {\n"
@@ -403,20 +452,6 @@ export func gen_shop_block(shop, pay): string {
     + "  return shop_cashier(ono);\n"
     + "};\n"
     ;
-  // demo：/shop/mock-pay 仅微信变体（PayPal 走真实 return/webhook；PAY_NOTIFY_URL/PAY_CFG 仅微信块声明）
-  if (provider != "paypal") {
-    t = t + ""
-    + "get \"/shop/mock-pay/:ono\", func(req) {\n"
-    + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
-    + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
-    + "  if (len(orows) == 0) { return ui.page(\"支付\", \"shop\", \"<h1>收银台 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">订单不存在</div>\"); }\n"
-    + "  let cents = int(get(orows[0], \"__AMF__\", 0));\n"
-    + "  let nb = stringify({ \"notify_url\": PAY_NOTIFY_URL, \"order_no\": ono, \"amount_cents\": cents });\n"
-    + "  http_post(str(get(PAY_CFG, \"gw\", \"\")) + \"/mock/notify\", { \"headers\": { \"Content-Type\": \"application/json\" }, \"body\": nb, \"allow_private\": true, \"timeout\": 10 });\n"
-    + "  return shop_result(ono);\n"
-    + "};\n"
-      ;
-  }
   t = t + ""
     + "get \"/shop/result/:ono\", func(req) {\n"
     + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
@@ -424,18 +459,36 @@ export func gen_shop_block(shop, pay): string {
     + "};\n"
     ;
   // 退款路由：/shop/refund/:ono 确认页（?confirm=1 执行；仅 paid 可退，重复退幂等）。
-  // PayPal 凭捕获回填的 capture_id 退（旧单无回填时 paypal_get_order 反查兜底）；
-  // 微信走 create_refund（out_refund_no 幂等，HMAC 签名，mock/沙箱可用）。
+  // PayPal 凭捕获回填的 capture_id 退（旧单无回填时 paypal_get_order 反查兜底）。
   t = t + ""
     + "get \"/shop/refund/:ono\", func(req) {\n"
     + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
     + "  let confirm = str(get(req.query_params, \"confirm\", \"\"));\n"
+    + "  let q_ppid = str(get(req.query_params, \"ppid\", \"\"));\n"
+    + "  let q_capid = str(get(req.query_params, \"capid\", \"\"));\n"
+    + "  let manual = str(get(req.query_params, \"manual\", \"\"));\n"
     + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
     + "  if (len(orows) == 0) { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">订单不存在</div><p><a href=\\\"/shop\\\">返回商城</a></p></div>\"); }\n"
     + "  let o = orows[0];\n"
     + "  let cents = int(get(o, \"__AMF__\", 0));\n"
     + "  let st = str(get(o, \"__STF__\", \"\"));\n"
+    + "  // 已退款订单：无论关联 ID 是否齐全，直接展示已退款（避免早期订单手动退款后\n"
+    + "  // 因两列仍 NULL 而在确认页误提示「去恢复关联 ID」）。\n"
+    + "  if (st == \"refunded\") { return ui.page(\"已退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>已退款 <span class=\\\"badge\\\">__PN__</span></h1><p>订单 <code>\" + ui.esc(ono) + \"</code> 已是退款状态。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a></p></div>\"); }\n"
+    + "  // 关联 ID 归一（SQL NULL 读出是 lume null，先归一）；早期订单缺列时允许从\n"
+    + "  // 退款请求带入手动恢复的关联 ID（PayPal 订单号 / 捕获 ID）\n"
+    + "  let ppid = str(get(o, \"" + ppidf + "\", \"\"));\n"
+    + "  if (ppid == \"null\") { ppid = \"\"; }\n"
+    + "  let cap_id = str(get(o, \"" + capf + "\", \"\"));\n"
+    + "  if (cap_id == \"null\") { cap_id = \"\"; }\n"
+    + "  if (ppid == \"\" && q_ppid != \"\") { ppid = q_ppid; }\n"
+    + "  if (cap_id == \"\" && q_capid != \"\") { cap_id = q_capid; }\n"
+    + "  let need_recover = (cap_id == \"\" && ppid == \"\");\n"
     + "  if (confirm != \"1\") {\n"
+    + "    if (need_recover) {\n"
+    + "      let body = \"<div class=\\\"panel\\\"><h1>申请退款 <span class=\\\"badge\\\">__PN__</span></h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> 金额 <strong>__CUR__\" + pay.fmt_cents(cents) + \"</strong></p>\\n<div class=\\\"flash warn\\\">该订单缺少 PayPal 关联 ID（早期订单），无法自动定位捕获记录。</div>\\n<p><a class=\\\"btn primary\\\" href=\\\"/shop/recover/\" + ui.esc(ono) + \"\\\">去恢复关联 ID 并退款</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ui.esc(ono) + \"\\\">返回</a></p></div>\\n\";\n"
+    + "      return ui.page(\"申请退款\", \"shop\", body);\n"
+    + "    }\n"
     + "    let body = \"<div class=\\\"panel\\\"><h1>申请退款 <span class=\\\"badge\\\">__PN__</span></h1>\\n<p>订单 <code>\" + ui.esc(ono) + \"</code> · 金额 <strong>__CUR__\" + pay.fmt_cents(cents) + \"</strong> · 状态 \" + ui.esc(st) + \"</p>\\n\"\n"
     + "      + \"<p class=\\\"muted\\\">退款将原路退回原支付账户。</p>\\n\"\n"
     + "      + \"<p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">确认退款</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/result/\" + ui.esc(ono) + \"\\\">返回</a></p></div>\\n\";\n"
@@ -448,37 +501,93 @@ export func gen_shop_block(shop, pay): string {
     + "    return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">仅已支付订单可退款（当前状态：\" + ui.esc(st) + \"）</div><p><a href=\\\"/shop/result/\" + ui.esc(ono) + \"\\\">查看订单</a></p></div>\");\n"
     + "  }\n"
     ;
-  if (provider == "paypal") {
     t = t + ""
-    + "  // 迁移补列（ALTER TABLE ADD COLUMN）产生的 SQL NULL 读出来是 lume null，\n"
-    + "  // str(null) 得字面量 \"null\"——非空串，会骗过 == \"\" 守卫，故先归一。\n"
-    + "  let cap_id = str(get(o, \"" + capf + "\", \"\"));\n"
-    + "  if (cap_id == \"null\") { cap_id = \"\"; }\n"
-    + "  if (cap_id == \"\") {\n"
-    + "    let ppid = str(get(o, \"" + ppidf + "\", \"\"));\n"
-    + "    if (ppid == \"null\") { ppid = \"\"; }\n"
-    + "    if (ppid == \"\") { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">订单缺少 PayPal 关联 ID（早期订单），无法定位捕获记录</div><p><a href=\\\"/shop\\\">返回商城</a></p></div>\"); }\n"
-    + "    let tk0 = pay.paypal_token(PAYPAL_CFG);\n"
-    + "    if (get(tk0, \"ok\", false) != true) { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk0, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">重试</a></p></div>\"); }\n"
-    + "    let go = pay.paypal_get_order(PAYPAL_CFG, str(get(tk0, \"token\", \"\")), ppid);\n"
-    + "    if (get(go, \"ok\", false) != true || str(get(go, \"capture_id\", \"\")) == \"\") { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">无法从 PayPal 反查捕获记录：\" + ui.esc(str(get(go, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">重试</a></p></div>\"); }\n"
-    + "    cap_id = str(get(go, \"capture_id\", \"\"));\n"
+    + "  // 已在 PayPal 后台手动退款：仅本地标记退款（状态 + 库存闭环），不调 PayPal API\n"
+    + "  if (manual == \"1\") {\n"
+    + "    sql_write(db.dsn(), \"" + upd_refunded + "\", [ono]);\n"
+    + refund_manual_tail
+    + "    return ui.page(\"已退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>已退款 <span class=\\\"badge\\\">__PN__</span></h1><p>订单 <code>\" + ui.esc(ono) + \"</code> 已在 PayPal 后台手动退款，本地状态已标记。</p><p class=\\\"muted\\\">如尚未在 PayPal 退款，请先到后台操作。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a></p></div>\");\n"
     + "  }\n"
+    + "  // 捕获 ID 定位：本地 cap_id -> 本地/请求 ppid 反查 -> 请求 capid 直达\n"
+    + "  // ppid 反查带捕获兜底：用户常把 PayPal 后台的「交易号/Transaction ID」（即捕获\n"
+    + "  // ID）当订单号填入——订单 GET 对捕获 ID 回 404 RESOURCE_NOT_FOUND。此时改查\n"
+    + "  // 捕获接口（related_ids.order_id 反解真实订单号），两列均回填正确值；已在真实\n"
+    + "  // 沙箱验证：捕获 ID 走 orders 端点必 404，走 captures 端点 200。\n"
+    + "  if (cap_id == \"\" && ppid != \"\") {\n"
+    + "    let tk0 = pay.paypal_token(PAYPAL_CFG);\n"
+    + "    if (get(tk0, \"ok\", false) != true) { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk0, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1&ppid=\" + ui.esc(ppid) + \"\\\">重试</a></p></div>\"); }\n"
+    + "    let tok0 = str(get(tk0, \"token\", \"\"));\n"
+    + "    let go = pay.paypal_get_order(PAYPAL_CFG, tok0, ppid);\n"
+    + "    if (get(go, \"ok\", false) != true) {\n"
+    + "      let gc = pay.paypal_get_capture(PAYPAL_CFG, tok0, ppid);\n"
+    + "      if (get(gc, \"ok\", false) == true) {\n"
+    + "        cap_id = str(get(gc, \"capture_id\", \"\"));\n"
+    + "        let rppid = str(get(gc, \"order_id\", \"\"));\n"
+    + "        if (rppid != \"\") { ppid = rppid; }\n"
+    + "      }\n"
+    + "    } else {\n"
+    + "      cap_id = str(get(go, \"capture_id\", \"\"));\n"
+    + "    }\n"
+    + "    if (cap_id == \"\") { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">无法从 PayPal 反查捕获记录：\" + ui.esc(str(get(go, \"err\", \"\"))) + \"</div><p class=\\\"muted\\\">可能原因：① 填写的 ID 有误或复制了其他交易；② 本店运行在 PayPal 沙箱（sandbox），而该 ID 来自正式（live）账号——请到 sandbox.paypal.com 后台重新查找；③ 这笔单并未通过 PayPal 收款。错误信息里的 debug_id 可提供给 PayPal 支持定位。</p><p class=\\\"muted\\\">若确认已在 PayPal 后台手动退款，可直接本地标记。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop/recover/\" + ui.esc(ono) + \"\\\">去恢复关联 ID</a> <a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1&manual=1\\\">本地标记退款</a></p></div>\"); }\n"
+    + "  }\n"
+    + "  if (cap_id == \"\") { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">仍未定位到捕获记录：请填入 PayPal 订单号/捕获 ID，或确认已在后台手动退款。</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/recover/\" + ui.esc(ono) + \"\\\">去恢复关联 ID</a></p></div>\"); }\n"
     + "  let tk = pay.paypal_token(PAYPAL_CFG);\n"
-    + "  if (get(tk, \"ok\", false) != true) { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">重试</a></p></div>\"); }\n"
+    + "  if (get(tk, \"ok\", false) != true) { return ui.page(\"退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">PayPal 令牌失败：\" + ui.esc(str(get(tk, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\" + (ppid != \"\" ? \"&ppid=\" + ui.esc(ppid) : \"\") + (q_capid != \"\" ? \"&capid=\" + ui.esc(q_capid) : \"\") + \"\\\">重试</a></p></div>\"); }\n"
     + "  let rf = pay.paypal_refund(PAYPAL_CFG, str(get(tk, \"token\", \"\")), cap_id, cents, \"Refund \" + ono);\n"
-    + "  if (get(rf, \"ok\", false) != true) { return ui.page(\"退款失败\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款失败 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">退款失败：\" + ui.esc(str(get(rf, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">重试</a></p></div>\"); }\n"
+    + "  if (get(rf, \"ok\", false) != true) { return ui.page(\"退款失败\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款失败 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">退款失败：\" + ui.esc(str(get(rf, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\" + (ppid != \"\" ? \"&ppid=\" + ui.esc(ppid) : \"\") + (q_capid != \"\" ? \"&capid=\" + ui.esc(q_capid) : \"\") + \"\\\">重试</a></p></div>\"); }\n"
+    + "  // 回补关联 ID（本次靠手动/反查补齐，使后续操作一致）；原行缺失才写回\n"
+    + "  if (ppid != \"\" || cap_id != \"\") { sql_write(db.dsn(), \"" + upd_ppid_cap + "\", [ppid, cap_id, ono]); }\n"
       ;
-  } else {
+  if (has_stock) {
     t = t + ""
-    + "  let rno = \"RF-\" + ono + \"-\" + str(now());\n"
-    + "  let rf = pay.create_refund(PAY_CFG, ono, cents, rno, PAY_NOTIFY_URL);\n"
-    + "  if (get(rf, \"ok\", false) != true) { return ui.page(\"退款失败\", \"shop\", \"<div class=\\\"panel\\\"><h1>退款失败 <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">退款失败：\" + ui.esc(str(get(rf, \"err\", \"\"))) + \"</div><p><a class=\\\"btn primary\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1\\\">重试</a></p></div>\"); }\n"
-      ;
+      + "  // 退款回补库存（P1-2）：凭订单行商品 id 列定位商品行；早期订单无商品引用则跳过\n"
+      + "  let rpid_s = str(get(o, \"" + prdf + "\", \"\"));\n"
+      + "  if (rpid_s == \"null\" || rpid_s == \"\") { rpid_s = \"0\"; }\n"
+      + "  if (int(rpid_s) > 0) { sql_write(db.dsn(), \"" + inc_stock + "\", [int(rpid_s)]); }\n";
   }
   t = t + ""
     + "  sql_write(db.dsn(), \"" + upd_refunded + "\", [ono]);\n"
     + "  return ui.page(\"已退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>已退款 <span class=\\\"badge\\\">__PN__</span></h1><p>订单 <code>\" + ui.esc(ono) + \"</code> 已退款 <strong>__CUR__\" + pay.fmt_cents(cents) + \"</strong>。</p><p class=\\\"muted\\\">款项将原路退回原支付账户。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a></p></div>\");\n"
+    + "};\n"
+    ;
+  // 恢复路由：早期订单缺 PayPal 关联 ID（迁移补列前，paypal_order_id/capture_id 全 NULL）
+  // 时，手工填入 PayPal 订单号（反查捕获记录；订单号框亦接受交易号/捕获 ID，订单 GET
+  // 404 后自动改查捕获接口反解订单号）或直接填捕获 ID（直达退款），或标记后台已退。
+  t = t + ""
+    + "get \"/shop/recover/:ono\", func(req) {\n"
+    + "  let ono = str(get(req.params, \"ono\", \"\"));\n"
+    + "  let orows = sql_query(db.dsn(), \"SELECT * FROM \\\"__OM__\\\" WHERE \\\"__ONF__\\\" = ?\", [ono]);\n"
+    + "  if (len(orows) == 0) { return ui.page(\"恢复关联 ID\", \"shop\", \"<div class=\\\"panel\\\"><h1>恢复关联 ID <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">订单不存在</div><p><a href=\\\"/shop\\\">返回商城</a></p></div>\"); }\n"
+    + "  let o = orows[0];\n"
+    + "  let cents = int(get(o, \"__AMF__\", 0));\n"
+    + "  let st = str(get(o, \"__STF__\", \"\"));\n"
+    + "  if (st == \"refunded\") { return ui.page(\"已退款\", \"shop\", \"<div class=\\\"panel\\\"><h1>已退款 <span class=\\\"badge\\\">__PN__</span></h1><p>订单 <code>\" + ui.esc(ono) + \"</code> 已退款。</p><p><a class=\\\"btn primary\\\" href=\\\"/shop\\\">继续购物</a></p></div>\"); }\n"
+    + "  if (st != \"paid\") { return ui.page(\"恢复关联 ID\", \"shop\", \"<div class=\\\"panel\\\"><h1>恢复关联 ID <span class=\\\"badge\\\">__PN__</span></h1><div class=\\\"flash err\\\">仅已支付订单可恢复关联 ID（当前状态：\" + ui.esc(st) + \"）</div><p><a href=\\\"/shop/result/\" + ui.esc(ono) + \"\\\">查看订单</a></p></div>\"); }\n"
+    + "  let ppid = str(get(o, \"" + ppidf + "\", \"\"));\n"
+    + "  if (ppid == \"null\") { ppid = \"\"; }\n"
+    + "  let cap_id = str(get(o, \"" + capf + "\", \"\"));\n"
+    + "  if (cap_id == \"null\") { cap_id = \"\"; }\n"
+    + "  let body = \"<div class=\\\"panel\\\"><h1>恢复 PayPal 关联 ID <span class=\\\"badge\\\">__PN__</span></h1>\\n\"\n"
+    + "    + \"<p>订单 <code>\" + ui.esc(ono) + \"</code> 金额 <strong>__CUR__\" + pay.fmt_cents(cents) + \"</strong></p>\\n\"\n"
+    + "    + \"<div class=\\\"flash warn\\\">该订单缺少 PayPal 关联 ID（早期订单），无法自动定位捕获记录。请在 PayPal 后台查到后填入，或确认已手动退款。</div>\\n\"\n"
+    + "    + \"<h2>方式一：填入 PayPal 订单号或交易号</h2>\\n\"\n"
+    + "    + \"<p class=\\\"muted\\\">本店运行在 <strong>PayPal 沙箱</strong>：请登录 <code>sandbox.paypal.com</code> → Activity 找到这笔交易 → 打开详情页。</p>\\n\"\n"
+    + "    + \"<p class=\\\"muted\\\"><strong>订单号</strong>（Order ID，17 位，如 <code>1AB23456CD7890123</code>）或 <strong>交易号</strong>（Transaction ID，即捕获 ID，如 <code>2CD34567DE8901234</code>）——任意填一个即可，系统会自动识别，只找到交易号也没问题。</p>\\n\"\n"
+    + "    + \"<form method=\\\"get\\\" action=\\\"/shop/refund/\" + ui.esc(ono) + \"\\\">\\n\"\n"
+    + "    + \"<input type=\\\"hidden\\\" name=\\\"confirm\\\" value=\\\"1\\\">\\n\"\n"
+    + "    + \"<label>PayPal 订单号或交易号 <input type=\\\"text\\\" name=\\\"ppid\\\" placeholder=\\\"1AB… 或 2CD…，二选一\\\"></label><br>\\n\"\n"
+    + "    + \"<button class=\\\"btn primary\\\" type=\\\"submit\\\">查询并退款</button></form>\\n\"\n"
+    + "    + \"<h2>方式二：直接填捕获 ID</h2>\\n\"\n"
+    + "    + \"<p class=\\\"muted\\\">已单独复制到交易号（捕获 ID）的话，也可直接填这里，跳过反查：</p>\\n\"\n"
+    + "    + \"<form method=\\\"get\\\" action=\\\"/shop/refund/\" + ui.esc(ono) + \"\\\">\\n\"\n"
+    + "    + \"<input type=\\\"hidden\\\" name=\\\"confirm\\\" value=\\\"1\\\">\\n\"\n"
+    + "    + \"<label>捕获 ID <input type=\\\"text\\\" name=\\\"capid\\\" placeholder=\\\"直接退款\\\"></label>\\n\"\n"
+    + "    + \"<button class=\\\"btn ghost\\\" type=\\\"submit\\\">直接退款</button></form>\\n\"\n"
+    + "    + \"<h2>方式三：已在 PayPal 后台手动退款</h2>\\n\"\n"
+    + "    + \"<p class=\\\"muted\\\">这笔款已在 PayPal 后台退过（或并非通过 PayPal 收款）？直接本地标记，不调用 PayPal：</p>\\n\"\n"
+    + "    + \"<p><a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"?confirm=1&manual=1\\\">本地标记退款</a></p>\\n\"\n"
+    + "    + \"<p><a class=\\\"btn ghost\\\" href=\\\"/shop/refund/\" + ui.esc(ono) + \"\\\">返回退款页</a></p></div>\\n\";\n"
+    + "  return ui.page(\"恢复关联 ID\", \"shop\", body);\n"
     + "};\n"
     ;
   // 占位符统一在拼接完成后替换（分支/尾部模板同样带占位符）
@@ -491,6 +600,7 @@ export func gen_shop_block(shop, pay): string {
   t = replace(t, "__STF__", stf);
   t = replace(t, "__PN__", pname);
   t = replace(t, "__CUR__", pcur);
+  t = replace(t, "__SKF__", skf);
   return t;
 }
 
@@ -528,7 +638,7 @@ export func gen_app_entry(out: string, mods, pay, shop): int {
     + imports
     + "\n// 首次启动自动建表（CREATE TABLE IF NOT EXISTS），并对已有表补齐新增列（迁移）\n"
     + "db.init([" + ddl_args + "]);\n\n"
-    + (pay != null ? gen_pay_block(pay) + "\n" : "")
+    + (pay != null ? gen_paypal_block(pay) + "\n" : "")
     + (pay != null && shop != null ? gen_shop_block(shop, pay) + "\n" : "")
     + "// 首页导航\n"
     + "get \"/\", func(req) {\n"
@@ -552,7 +662,7 @@ export func gen_app_entry(out: string, mods, pay, shop): int {
 }
 
 // 串联：建目录 -> 复制静态基座 -> ui.lume -> app.lume -> web/ React 前端
-// pay 为 config.pay（或 null）；非 null 时 app.lume 注入支付接线（见 gen_pay_block）
+// pay 为 config.pay（或 null）；非 null 时 app.lume 注入支付接线（见 gen_paypal_block）
 // shop 为 config.shop（或 null）；pay+shop 同时非 null 时注入店面（见 gen_shop_block）
 export func base_project(out: string, mods, pay, shop): int {
   mkdir(out);

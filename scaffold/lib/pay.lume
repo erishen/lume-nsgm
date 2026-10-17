@@ -1,154 +1,40 @@
 // pay.lume — 支付库（lume-nsgm 生成项目的静态基座，随 scaffold 复制到 gen/lib/）
 //
-// 两套适配器，由生成配置 pay.provider 选择：
-//   1) 微信支付 v3（wechat）：HMAC 签名 / Native 下单 / 回调验签。见下文。
-//   2) PayPal Express Checkout（paypal，2026-10-16 新增）：OAuth2 Bearer +
-//      REST Orders v2（建单 / 捕获 / 查单兜底 / 退款 / webhook 验签）。OAuth2 的
-//      HTTP Basic 凭证 base64(client_id:client_secret) 用到 lume-core 0.7.0+ 的
-//      base64_encode 内建（同轮 P3 补）。
+// 支付适配器：PayPal Express Checkout（provider: paypal）。
+//   OAuth2 Bearer + REST Orders v2（建单 / 捕获 / 查单兜底 / 退款 / webhook 验签）。
+//   OAuth2 的 HTTP Basic 凭证 base64(client_id:client_secret) 用到 lume-core
+//   0.7.0+ 的 base64_encode 内建。
 //
-// 微信 v3 线格式与真实网关的差距（已知边界，详见 README「支付」节与 TODO S7/S8）：
-//   - 真实 v3 签名是 SHA256-RSA（商户私钥签名），本库标签为 ...-HMAC；
-//     接真实网关需外挂 RSA 签名 sidecar（http_post 带 allow_private 打本地
-//     服务）或等 core 补 RSA 内建；
-//   - 真实 v3 回调验签读 Wechatpay-Signature/Timestamp/Nonce/Serial 响应头，
-//     而 core 的 req 未暴露请求头 ⇒ 本库回调验签的签名材料随 JSON body 传递
-//     （沙箱约定，字段名 verify_ts / verify_nonce / verify_sign）；
-//   - 无 random 内建 ⇒ nonce 由 order_no + now() 派生（秒级精度，同一订单
-//     同秒重复请求会拿到同一 nonce；沙箱可接受，生产需随机源）。
-// PayPal 适配器同样把 webhook 验签材料随 JSON body 传递（verify_id/verify_ts/
-// verify_sign），与微信共用 S7 边界；真实 PayPal webhook 还含 crc32(body)，
-// core 暂无 crc32 内建 ⇒ 本库 webhook 验签为 HMAC 简化版（沙箱够用，生产
-// 需补 crc32 内建或外挂 sidecar）。
+// 已知边界（沙箱等价实现，详见 README「支付」节与 TODO S7）：
+//   - webhook 验签为纯 HMAC 简化版：真实 PayPal webhook 签名含 crc32(body)，
+//     core 暂无 crc32 内建 ⇒ 验签材料（verify_id / verify_ts / verify_sign）
+//     随 JSON body 传递（沙箱约定）；
+//   - 返回/回调走 query_params（core 的 req.query_params 已解析），不依赖请求头；
+//   - 无随机源 ⇒ 业务单号由生成器侧派生（order_no + now()），沙箱够用。
 
-// HTML 属性转义（本库自含，避免依赖生成的 ui.lume——pay.lume 先于 ui 被 import）
-func esc_attr(s): string {
-  let out = str(s);
-  out = replace(out, "&", "&amp;");
-  out = replace(out, "<", "&lt;");
-  out = replace(out, ">", "&gt;");
-  out = replace(out, "\"", "&quot;");
-  return out;
+// 整数分 -> "x.xx"（不用浮点，规避 .2f 精度风险）
+export func paypal_fmt_cents(cents: int): string {
+  let d = int(cents / 100);
+  let r = cents - d * 100;
+  let rs = str(r);
+  if (r < 10) { rs = "0" + rs; }
+  return str(d) + "." + rs;
 }
 
-// 签名规范串（v3 形状）：方法\nURL 路径\n时间戳\n随机串\n报文主体\n
-export func canonical(method: string, path: string, ts, nonce: string, body: string): string {
-  return method + "\n" + path + "\n" + str(ts) + "\n" + nonce + "\n" + body + "\n";
-}
-
-// HMAC-SHA256 签名（hex）。secret 来自环境变量（如 PAY_SECRET），勿硬编码。
-export func sign(secret: string, method: string, path: string, ts, nonce: string, body: string): string {
-  return hmac_sha256(secret, canonical(method, path, ts, nonce, body));
-}
-
-// Authorization 头（v3 形状，算法标签 HMAC——真实微信为 SHA256-RSA）
-export func auth_header(mchid: string, serial: string, ts, nonce: string, sign_hex: string): string {
-  return "WECHATPAY2-SHA256-HMAC mchid=\"" + mchid + "\",serial_no=\"" + serial
-    + "\",nonce_str=\"" + nonce + "\",timestamp=\"" + str(ts) + "\",signature=\"" + sign_hex + "\"";
-}
-
-// nonce 派生：order_no 唯一 ⇒ nonce 逐单唯一；秒级时间戳防同单跨秒重复。
-// 局限：无随机源（见文件头 S8），同单同秒的并发请求 nonce 相同。
-export func nonce_str(order_no: string): string {
-  return order_no + "-" + str(now());
-}
-
-// Native 下单：POST {gw}/v3/pay/transactions/native，返回支付码 URL（code_url）。
-// cfg = { "gw", "appid", "mchid", "serial", "secret" }；
-// 返回 { ok, status, err, code_url, prepay_id }——网关 4xx/5xx 或网络错误
-// 均 ok=false（调用方按 502 处理，勿把网关错误当支付成功）。
-// 注意 ok 用 bool：lume 运行时 bool 与 int 不可比（true==1 恒 false），
-// 混用会让调用方的 != true / == 1 判断静默站错边。
-export func create_native(cfg, order_no: string, cents: int, desc: string, notify_url: string) {
-  let gw = str(get(cfg, "gw", ""));
-  let mchid = str(get(cfg, "mchid", ""));
-  let secret = str(get(cfg, "secret", ""));
-  let path = "/v3/pay/transactions/native";
-  let ts = now();
-  let nonce = nonce_str(order_no);
-  let body = stringify({
-    "appid": str(get(cfg, "appid", "")),
-    "mchid": mchid,
-    "description": desc,
-    "out_trade_no": order_no,
-    "notify_url": notify_url,
-    "amount": { "total": cents, "currency": "CNY" }
-  });
-  let sign_hex = sign(secret, "POST", path, ts, nonce, body);
-  let hdrs = {
-    "Authorization": auth_header(mchid, str(get(cfg, "serial", "")), ts, nonce, sign_hex),
-    "Content-Type": "application/json",
-    "Accept": "application/json"
-  };
-  // allow_private：本地 mock 网关 / sidecar 跑在 127.0.0.1（真实微信域名不受影响）
-  // 注意：http_* 返回的 ok 是 bool——lume 的 int(true)=0 且运行时 bool==1 恒 false，
-  // 必须用 != true 比较（曾在此栽过：int(get(r,"ok",0)) != 1 恒真，成功也被当失败）。
-  let r = http_post(gw + path, { "headers": hdrs, "body": body, "allow_private": true, "timeout": 10 });
-  let status = int(get(r, "status", 0));
-  if (get(r, "ok", false) != true || status < 200 || status >= 300) {
-    let rbody = str(get(r, "body", ""));
-    return { "ok": false, "status": status, "code_url": "", "prepay_id": "",
-             "err": str(get(r, "err", "")) + (rbody != "" ? " body=" + rbody : "") };
-  }
-  let jr = try(() => json(str(get(r, "body", ""))));
-  let j = get(jr, "ok", null);
-  if (j == null) {
-    return { "ok": false, "status": status, "code_url": "", "prepay_id": "", "err": "invalid json from gateway" };
-  }
-  return { "ok": true, "status": status, "err": "",
-           "code_url": str(get(j, "code_url", "")), "prepay_id": str(get(j, "prepay_id", "")) };
-}
-
-// 回调验签：用同一 secret 重算 时间戳\n随机串\n报文主体\n 的 HMAC 并比对。
-// 注意：lume 无常数时间比较，此处为普通 ==（沙箱够用；生产侧由网关侧
-// sidecar 或 core 补内建时再收紧）。
-export func verify_notify(secret: string, ts: string, nonce: string, body: string, sign_hex: string): bool {
-  if (sign_hex == "") { return false; }
-  let expect = hmac_sha256(secret, ts + "\n" + nonce + "\n" + body + "\n");
-  return expect == sign_hex;
-}
-
-// 回调应答（v3 形状）：成功/失败都回 200 + JSON，失败时微信按策略重试
-export func notify_ok() {
-  return { "code": "SUCCESS" };
-}
-
-export func notify_fail(msg: string) {
-  return { "code": "FAIL", "message": msg };
-}
-
-// 支付跳转页：自动提交表单（POST 到网关收银台）。
-// core 的 handler 无法发 302/自定义响应头（已知边界 S3），这是既定变通；
-// 恰好也是微信/支付宝跳转类支付（H5/PC 扫码）的标准姿势。
-// fields = map（hidden input 名 -> 值）；title = 页面标题。
-export func redirect_html(action: string, fields, title: string): string {
-  let inputs = "";
-  let ks = keys(fields);
-  let i = 0;
-  while (i < len(ks)) {
-    let k = ks[i];
-    inputs = inputs + "<input type=\"hidden\" name=\"" + esc_attr(k)
-      + "\" value=\"" + esc_attr(str(get(fields, k, ""))) + "\">";
-    i = i + 1;
-  }
-  return "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n"
-    + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-    + "<title>" + esc_attr(title) + "</title>\n</head>\n"
-    + "<body onload=\"document.forms[0].submit()\">\n"
-    + "<p>正在跳转支付页面，请勿关闭…</p>\n"
-    + "<form method=\"post\" action=\"" + esc_attr(action) + "\">\n"
-    + inputs + "\n</form>\n</body>\n</html>\n";
+// 金额展示（分 -> "x.xx" 元）：整数运算无浮点误差，店面/后台通用。
+export func fmt_cents(cents: int): string {
+  return paypal_fmt_cents(cents);
 }
 
 // ============================================================================
-// PayPal Express Checkout（provider: paypal，2026-10-16）
+// PayPal Express Checkout
 //
 // 流程：OAuth2 client_credentials 拿 Bearer token → POST /v2/checkout/orders
-// 建单拿 approve_url（浏览器跳转）→ 用户在 PayPal  approve → PayPal 跳回
+// 建单拿 approve_url（浏览器跳转）→ 用户在 PayPal approve → PayPal 跳回
 // return_url?token=<paypal_order_id> → 服务端 POST .../capture 捕获 → 改本单
 // 状态。webhook 为异步事件，沙箱内用简化 HMAC 验签（见文件头 S7/PayPal 说明）。
 //
-// 金额用整数 cents（与微信同口径，避免浮点精度问题），转 "x.xx" 字符串。
+// 金额用整数 cents，转 "x.xx" 字符串（fmt_cents）。
 // OK 一律用 bool（lume 运行时 bool==int 恒 false，必须用 != true 比较）。
 // ============================================================================
 
@@ -161,20 +47,6 @@ export func paypal_base_url(mode: string): string {
 // OAuth2 HTTP Basic 凭证值：Basic base64(client_id:client_secret)
 export func paypal_basic_auth(client_id: string, secret: string): string {
   return "Basic " + base64_encode(client_id + ":" + secret);
-}
-
-// 整数分 → "x.xx"（不用浮点，规避 .2f 精度风险）
-export func paypal_fmt_cents(cents: int): string {
-  let d = int(cents / 100);
-  let r = cents - d * 100;
-  let rs = str(r);
-  if (r < 10) { rs = "0" + rs; }
-  return str(d) + "." + rs;
-}
-
-// 金额展示（分 -> "x.xx" 元）：整数运算无浮点误差，店面/后台通用。
-export func fmt_cents(cents: int): string {
-  return paypal_fmt_cents(cents);
 }
 
 // 令牌简单缓存：PayPal token 有效期约 9h，进程内复用避免每次建单都握手。
@@ -299,6 +171,23 @@ export func paypal_create(cfg, token: string, order_no: string, cents: int, desc
   return { "ok": true, "approve_url": approve, "paypal_order_id": oid, "err": "" };
 }
 
+// 由 PayPal 订单 ID 重建 approve 链接（收银台复用已建单时用，避免重复建单）：
+//   - 本地/mock 网关（gw 指向 127.0.0.1/localhost）：mock 收银台
+//     {gw}/mock/paypal/approve?token=<id>（与 mock_pay_gateway.py 建单时下发的
+//     approve 链接同形，token 即订单 ID）；
+//   - 真实 PayPal（v2 Orders）：https://{www|www.sandbox}.paypal.com/checkoutnow?token=<id>。
+// 本地单仍 pending 才复用（收银台对 paid 单直接跳结果页），PayPal 侧订单在
+// 用户 approve 前一直可支付；已 approve/捕获的单本地已 paid，走不到复用分支。
+export func paypal_approve_url(cfg, paypal_order_id: string): string {
+  let gw = str(get(cfg, "gw", ""));
+  if (contains(gw, "127.0.0.1") || contains(gw, "localhost")) {
+    return gw + "/mock/paypal/approve?token=" + paypal_order_id;
+  }
+  let base = "https://www.paypal.com";
+  if (contains(gw, "sandbox")) { base = "https://www.sandbox.paypal.com"; }
+  return base + "/checkoutnow?token=" + paypal_order_id;
+}
+
 // 捕获：POST {gw}/v2/checkout/orders/{id}/capture（幂等由 PayPal 侧 order 状态保证）。
 // 返回 { ok, status, capture_id, err }
 export func paypal_capture(cfg, token: string, paypal_order_id: string) {
@@ -322,7 +211,7 @@ export func paypal_capture(cfg, token: string, paypal_order_id: string) {
       return { "ok": true, "status": "COMPLETED", "capture_id": "", "err": "" };
     }
     return { "ok": false, "status": "", "capture_id": "",
-             "err": str(get(r, "err", "")) + (rbody != "" ? " body=" + rbody : "") };
+                 "err": str(get(r, "err", "")) + (rbody != "" ? " body=" + rbody : "") };
   }
   let jr = try(() => json(str(get(r, "body", ""))));
   let j = get(jr, "ok", null);
@@ -349,12 +238,14 @@ export func paypal_verify_webhook(secret: string, id: string, ts: string, body: 
 }
 
 // ============================================================================
-// 退款（provider 无关入口由生成器的 /shop/refund 路由分流到下面两套）
+// 退款（生成器的 /shop/refund 路由调用）
 //
 // PayPal：退款对象是「捕获」而非订单——POST /v2/payments/captures/{capture_id}/refund。
 //   捕获时拿到的 capture_id 由生成器回填订单表；旧订单（退款功能上线前捕获的）
 //   没有回填列，用 paypal_get_order() 从 PayPal 侧反查捕获 ID 兜底。
-// 微信：POST /v3/refund/domestic/refunds，out_refund_no 幂等（同号重发返回原结果）。
+//   用户恢复关联 ID 时常把后台的「交易号 / Transaction ID」（即捕获 ID）当订单号
+//   填入——订单 GET 对捕获 ID 回 404 RESOURCE_NOT_FOUND，此时用 paypal_get_capture()
+//   改查捕获接口兜底（捕获详情的 related_ids.order_id 反解订单号）。
 // ============================================================================
 
 // 出站 GET 带传输层重试（语义同 pp_post：只重试传输失败，4xx/5xx 不重放）
@@ -401,10 +292,46 @@ export func paypal_get_order(cfg, token: string, paypal_order_id: string) {
   return { "ok": true, "capture_id": cap, "order_status": str(get(j, "status", "")), "err": "" };
 }
 
+// 查捕获：GET {gw}/v2/payments/captures/{id}。
+// 兜底路径：订单 GET 404（用户把「交易号/Transaction ID」即捕获 ID 当订单号填入，
+// PayPal 回 RESOURCE_NOT_FOUND/INVALID_RESOURCE_ID）后改查本接口。捕获详情的
+// supplementary_data.related_ids.order_id 反解真实订单号，使回填两列都拿到正确值。
+// 返回 { ok, capture_id, order_id, order_status, err }
+export func paypal_get_capture(cfg, token: string, capture_id: string) {
+  let url = str(get(cfg, "gw", "")) + "/v2/payments/captures/" + capture_id;
+  let r = pp_get(url, {
+    "headers": {
+      "Authorization": "Bearer " + token,
+      "Accept": "application/json"
+    },
+    "allow_private": true,
+    "timeout": 30
+  });
+  let status = int(get(r, "status", 0));
+  if (get(r, "ok", false) != true || status < 200 || status >= 300) {
+    let rbody = str(get(r, "body", ""));
+    return { "ok": false, "capture_id": "", "order_id": "", "order_status": "",
+             "err": str(get(r, "err", "")) + (rbody != "" ? " body=" + rbody : "") };
+  }
+  let jr = try(() => json(str(get(r, "body", ""))));
+  let j = get(jr, "ok", null);
+  if (j == null) {
+    return { "ok": false, "capture_id": "", "order_id": "", "order_status": "",
+             "err": "invalid json from paypal get capture" };
+  }
+  let sup = get(j, "supplementary_data", {});
+  let rel = get(sup, "related_ids", {});
+  return { "ok": true, "capture_id": capture_id,
+           "order_id": str(get(rel, "order_id", "")),
+           "order_status": str(get(j, "status", "")), "err": "" };
+}
+
 // 退款：POST {gw}/v2/payments/captures/{capture_id}/refund，默认全额退。
 // 返回 { ok, refund_id, status, err }
-// 幂等对账：重复退款 PayPal 回 422（body 含 ALREADY_REFUNDED / REFUND_ALREADY_EXISTS
-// /DUPLICATE），说明上一次其实已退成功——按成功处理，避免用户看到假失败。
+// 幂等对账：重复退款 PayPal 回 422。issue 编码随金额/历史情形有几种（真实沙箱
+// 2026-10-17 实证：已全额退再退回 CAPTURE_FULLY_REFUNDED；文档与旧 mock 用
+// ALREADY_REFUNDED；部分退后再退同额回 REFUND_ALREADY_EXISTS/DUPLICATE）——
+// 都说明上一次其实已退成功，按成功处理，避免用户看到假失败。
 export func paypal_refund(cfg, token: string, capture_id: string, cents: int, note: string) {
   let url = str(get(cfg, "gw", "")) + "/v2/payments/captures/" + capture_id + "/refund";
   let body = stringify({
@@ -428,6 +355,7 @@ export func paypal_refund(cfg, token: string, capture_id: string, cents: int, no
   if (get(r, "ok", false) != true || status < 200 || status >= 300) {
     let rbody = str(get(r, "body", ""));
     if (status == 422 && (contains(rbody, "ALREADY_REFUNDED")
+                       || contains(rbody, "CAPTURE_FULLY_REFUNDED")
                        || contains(rbody, "REFUND_ALREADY_EXISTS")
                        || contains(rbody, "DUPLICATE"))) {
       return { "ok": true, "refund_id": "", "status": "COMPLETED", "err": "" };
@@ -441,44 +369,4 @@ export func paypal_refund(cfg, token: string, capture_id: string, cents: int, no
     return { "ok": false, "refund_id": "", "status": "", "err": "invalid json from paypal refund" };
   }
   return { "ok": true, "refund_id": str(get(j, "id", "")), "status": str(get(j, "status", "")), "err": "" };
-}
-
-// 微信申请退款：POST {gw}/v3/refund/domestic/refunds（HMAC 签名，与 create_native 同口径；
-// 真实网关为 SHA256-RSA + 商户证书，属已知边界 S7，mock/沙箱可用）。
-// out_refund_no 幂等：同号重复申请网关返回原退款结果（本地以订单状态守卫为主）。
-// 返回 { ok, refund_id, status, err }
-export func create_refund(cfg, order_no: string, cents: int, refund_no: string, notify_url: string) {
-  let gw = str(get(cfg, "gw", ""));
-  let mchid = str(get(cfg, "mchid", ""));
-  let secret = str(get(cfg, "secret", ""));
-  let path = "/v3/refund/domestic/refunds";
-  let ts = now();
-  let nonce = refund_no + "-" + str(now());
-  let body = stringify({
-    "appid": str(get(cfg, "appid", "")),
-    "mchid": mchid,
-    "out_trade_no": order_no,
-    "out_refund_no": refund_no,
-    "notify_url": notify_url,
-    "amount": { "refund": cents, "total": cents, "currency": "CNY" }
-  });
-  let sign_hex = sign(secret, "POST", path, ts, nonce, body);
-  let hdrs = {
-    "Authorization": auth_header(mchid, str(get(cfg, "serial", "")), ts, nonce, sign_hex),
-    "Content-Type": "application/json",
-    "Accept": "application/json"
-  };
-  let r = pp_post(gw + path, { "headers": hdrs, "body": body, "allow_private": true, "timeout": 10 });
-  let status = int(get(r, "status", 0));
-  if (get(r, "ok", false) != true || status < 200 || status >= 300) {
-    let rbody = str(get(r, "body", ""));
-    return { "ok": false, "refund_id": "", "status": "",
-             "err": str(get(r, "err", "")) + (rbody != "" ? " body=" + rbody : "") };
-  }
-  let jr = try(() => json(str(get(r, "body", ""))));
-  let j = get(jr, "ok", null);
-  if (j == null) {
-    return { "ok": false, "refund_id": "", "status": "", "err": "invalid json from gateway refund" };
-  }
-  return { "ok": true, "refund_id": str(get(j, "refund_id", "")), "status": str(get(j, "status", "")), "err": "" };
 }

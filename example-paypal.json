@@ -8,6 +8,7 @@
         { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
         { "name": "name", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "商品名" },
         { "name": "price_cents", "type": "integer", "required": 1, "showInList": 1, "showInForm": 1, "comment": "价格（分）" },
+        { "name": "stock", "type": "integer", "required": 1, "showInList": 1, "showInForm": 1, "comment": "库存" },
         { "name": "detail", "type": "varchar", "required": 0, "showInList": 0, "showInForm": 1, "comment": "商品描述" },
         { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "showInForm": 0, "comment": "创建时间" }
       ]
@@ -18,6 +19,8 @@
         { "name": "id", "type": "integer", "required": 1, "primary": 1, "auto": 1, "system": 1, "showInList": 1, "comment": "ID" },
         { "name": "order_no", "type": "varchar", "required": 1, "showInList": 1, "showInForm": 1, "searchable": 1, "comment": "订单号" },
         { "name": "amount_cents", "type": "integer", "required": 1, "showInList": 1, "showInForm": 1, "comment": "金额（分）" },
+        { "name": "product_id", "type": "integer", "required": 0, "showInList": 1, "showInForm": 1, "comment": "商品 ID（店面下单回填）" },
+        { "name": "product_name", "type": "varchar", "required": 0, "default": "''", "showInList": 1, "showInForm": 0, "comment": "商品名快照（下单时定格）" },
         { "name": "paypal_order_id", "type": "varchar", "showInList": 1, "showInForm": 0, "comment": "PayPal 订单 ID（可选，建单后回填）" },
         { "name": "capture_id", "type": "varchar", "showInList": 0, "showInForm": 0, "comment": "PayPal 捕获 ID（退款用，捕获后回填）" },
         { "name": "status", "type": "varchar", "default": "'pending'", "system": 1, "showInList": 1, "showInForm": 0, "searchable": 1, "comment": "状态" },
@@ -30,6 +33,8 @@
     "client_id": "AUmock_client_id_sandbox_001",
     "secret_env": "PAYPAL_KEY",
     "mode": "sandbox",
+    "currency": "USD",
+    "currency_symbol": "$",
     "order_module": "order",
     "order_no_field": "order_no",
     "amount_field": "amount_cents",
@@ -40,6 +45,9 @@
     "product_module": "product",
     "order_module": "order",
     "name_field": "name",
-    "price_field": "price_cents"
+    "price_field": "price_cents",
+    "stock_field": "stock",
+    "product_field": "product_id",
+    "product_name_field": "product_name"
   }
 }

@@ -76,12 +76,10 @@ COPY lume-nsgm/lib ./lib
 COPY lume-nsgm/templates ./templates
 COPY lume-nsgm/scaffold ./scaffold
 COPY lume-nsgm/example-config.json ./example-config.json
-COPY lume-nsgm/example-pay.json ./example-pay.json
 COPY lume-nsgm/example-paypal.json ./example-paypal.json
 
 # 构建配置：默认 example-config.json（CRUD 演示）；传
-#   --build-arg NSGM_CONFIG=example-pay.json       微信支付变体
-#   --build-arg NSGM_CONFIG=example-paypal.json    PayPal 变体
+#   --build-arg NSGM_CONFIG=example-paypal.json    PayPal 支付变体
 # 可打出带支付接线的镜像（order 模块 + pay 路由，密钥运行时由 env 注入）。
 ARG NSGM_CONFIG=example-config.json
 

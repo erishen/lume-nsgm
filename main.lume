@@ -13,7 +13,7 @@ import "lib/base.lume" as base;
 import "lib/validate.lume" as v;
 
 // refund 非 null 时（有店面+支付的订单模块）列表行注入退款链接，见 modlume.gen_module；
-// cur 为金额列货币符号（店面 provider 决定 ¥/$），仅 *_cents 列表列使用
+// cur 为金额列货币符号（支付为 PayPal，$ 计价），仅 *_cents 列表列使用
 func gen_one(ctrl: string, fs, n: int, db: string, out: string, refund, cur: string): int {
   let sql_text = sql.gen_sql(ctrl, fs, n, db);
   let module_text = modlume.gen_module(ctrl, fs, n, refund, cur);
@@ -118,12 +118,12 @@ func cmd_config(path: string): int {
   let om = "order";
   let onf = "order_no";
   let stf = "status";
-  let cur = "¥";
+  let cur = "$";
   if (pay != null) {
+    cur = str(get(pay, "currency_symbol", "$"));
     om = str(get(pay, "order_module", "order"));
     onf = str(get(pay, "order_no_field", "order_no"));
     stf = str(get(pay, "status_field", "status"));
-    if (str(get(pay, "provider", "wechat")) == "paypal") { cur = "$"; }
   }
   let i = 0;
   while (i < len(mods)) {

@@ -1,36 +1,29 @@
 #!/usr/bin/env python3
-"""mock_pay_gateway.py — 支付 mock 网关（lume-nsgm 支付 e2e 用）。
+"""mock_pay_gateway.py — PayPal 支付 mock 网关（lume-nsgm 支付 e2e 用）。
 
-同时支持两套形状，一套进程即可服务微信与 PayPal 两种生成工程：
-
-微信支付 v3（provider: wechat）：
+PayPal Express Checkout：
   GET  /health           就绪探针
-  POST /v3/pay/native    下单：验 Authorization 头签名，返回 code_url/prepay_id
-  POST /mock/notify      代网关投递回调：对业务报文签名后 POST 到应用的
-                         notify_url（签名材料随 body，沙箱约定）
-  POST /v3/refund/domestic/refunds
-                         申请退款：验签名；out_refund_no 幂等（同号重发返回原结果）
-
-PayPal Express Checkout（provider: paypal）：
   POST /v1/oauth2/token              OAuth2 client_credentials：验 HTTP Basic
                                      (Base64(client_id:client_secret))，下发 Bearer
   POST /v2/checkout/orders          建单：返回 id + links[].rel=approve（指向本 mock
                                      收银台 /mock/paypal/approve?token=...）
   POST /v2/checkout/orders/{id}/capture  捕获：返回 COMPLETED + capture id
   GET  /v2/checkout/orders/{id}     查单：返回订单详情（含 captures，退款反查兜底用）
+  GET  /v2/payments/captures/{id}   查捕获：返回捕获详情（含
+                                     supplementary_data.related_ids.order_id——用户把
+                                     「交易号/捕获 ID」当订单号填入、订单 GET 404 后的兜底）
   POST /v2/payments/captures/{id}/refund  退款：重复退同一捕获回 422
                                      （body 含 ALREADY_REFUNDED，应用侧按成功对账）
+  GET  /mock/paypal/orders       建单计数（e2e 断言收银台复用：刷新/重试不新增订单）
   GET  /mock/paypal/approve?token=..  模拟 PayPal 收银台 approve 后 302 跳回
                                      return_url?token=..（return_url 建单时由应用传入）
 
-两套都只监听 127.0.0.1（私有地址）；lume 侧 http_post 需 allow_private
+只监听 0.0.0.0（localhost 仍可用）；lume 侧 http_post 需 allow_private
 （pay.lume 已带）。stdlib only，无第三方依赖。
 """
 
 import argparse
 import base64
-import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -43,48 +36,18 @@ from urllib.parse import urlparse, parse_qs
 
 PORT = int(os.environ.get("MOCK_PAY_PORT", "18097"))
 LISTEN_PORT = PORT  # 实际监听端口（--port 可覆盖），建单 approve 链接用它拼主机
-SECRET = os.environ.get("MOCK_PAY_SECRET", "mock-secret").encode()
-SCHEME = "WECHATPAY2-SHA256-HMAC"
 
 # ----- PayPal (Express Checkout) mock -----
 PP_CLIENT_ID = os.environ.get("MOCK_PAYPAL_CLIENT_ID", "AUmock_client_id_sandbox_001").encode()
 PP_SECRET = os.environ.get("MOCK_PAYPAL_CLIENT_SECRET", "e2e-mock-key").encode()
-PP_ISSUED_TOKEN = [None]   # 最近下发的 access_token（捕获时校验 Bearer）
+PP_ISSUED_TOKEN = [None]   # 最近下发的 access_token（兼容字段）
+PP_VALID_TOKENS = set()     # 所有已下发的 token 均视为有效（不主动过期，避免并发/缓存侧相互顶替）
 PP_ORDERS = {}             # order_id -> return_url（建单时由应用传入）
 PP_CAPTURES = {}           # capture_id -> {"order_id": .., "amount": .., "refunded": bool}
 PP_REFUNDS = {}            # refund_id -> capture_id（已退记录）
 
 # 投递回调走本机回环，显式禁代理（宿主/沙箱可能设了 http_proxy）
 NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-
-# 记录每次下单/回调，便于调试与断言
-ORDERS = {}
-
-
-def canonical(method: str, path: str, ts: str, nonce: str, body: str) -> bytes:
-    return f"{method}\n{path}\n{ts}\n{nonce}\n{body}\n".encode()
-
-
-def sign(method: str, path: str, ts: str, nonce: str, body: str) -> str:
-    return hmac.new(SECRET, canonical(method, path, ts, nonce, body), hashlib.sha256).hexdigest()
-
-
-def sign_notify(ts: str, nonce: str, body: str) -> str:
-    """回调验签规范串（v3 形状）：时间戳\n随机串\n报文主体\n（无方法/路径段）。"""
-    return hmac.new(SECRET, f"{ts}\n{nonce}\n{body}\n".encode(), hashlib.sha256).hexdigest()
-
-
-def parse_auth(header: str):
-    """解析 'SCHEME mchid="..",serial_no="..",nonce_str="..",timestamp="..",signature=".."'"""
-    if not header.startswith(SCHEME + " "):
-        return None
-    out = {}
-    for part in header[len(SCHEME) + 1:].split(","):
-        if "=" not in part:
-            continue
-        k, v = part.split("=", 1)
-        out[k.strip()] = v.strip().strip('"')
-    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -110,10 +73,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._json(200, {"ok": True})
+        elif self.path == "/mock/paypal/orders":
+            # 建单计数（e2e 断言收银台复用：刷新/重试不应新增 PayPal 侧订单）
+            self._json(200, {"orders": len(PP_ORDERS)})
         elif self.path.startswith("/mock/paypal/approve"):
             self._approve()
         elif self.path.startswith("/v2/checkout/orders/"):
             self._pp_get_order(self.path[len("/v2/checkout/orders/"):])
+        elif self.path.startswith("/v2/payments/captures/"):
+            self._pp_get_capture(self.path[len("/v2/payments/captures/"):])
         else:
             self._json(404, {"code": "NOT_FOUND"})
 
@@ -121,13 +89,7 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(n) if n else b""
 
-        if self.path == "/v3/pay/transactions/native":
-            self._native(raw)
-        elif self.path == "/mock/notify":
-            self._notify(raw)
-        elif self.path == "/v3/refund/domestic/refunds":
-            self._wx_refund(raw)
-        elif self.path == "/v1/oauth2/token":
+        if self.path == "/v1/oauth2/token":
             self._oauth(raw)
         elif self.path == "/v2/checkout/orders":
             self._orders(raw)
@@ -139,116 +101,6 @@ class Handler(BaseHTTPRequestHandler):
             self._pp_refund(raw, cid)
         else:
             self._json(404, {"code": "NOT_FOUND"})
-
-    # ---------------- 微信 v3 ----------------
-
-    def _native(self, raw: bytes):
-        auth = parse_auth(self.headers.get("Authorization", ""))
-        if auth is None:
-            self._json(401, {"code": "UNAUTHORIZED", "message": "bad authorization scheme"})
-            return
-        expect = sign("POST", "/v3/pay/transactions/native", auth.get("timestamp", ""),
-                      auth.get("nonce_str", ""), raw.decode())
-        if not hmac.compare_digest(expect, auth.get("signature", "")):
-            if os.environ.get("MOCK_PAY_DEBUG"):
-                sys.stderr.write("[mock-gw][debug] auth=%r\n" % (auth,))
-                sys.stderr.write("[mock-gw][debug] body=%r\n" % (raw.decode(),))
-                sys.stderr.write("[mock-gw][debug] expect=%s got=%s\n"
-                                 % (expect, auth.get("signature", "")))
-            self._json(401, {"code": "UNAUTHORIZED", "message": "signature mismatch"})
-            return
-        try:
-            body = json.loads(raw.decode())
-        except Exception:
-            self._json(400, {"code": "PARAM_ERROR", "message": "invalid json"})
-            return
-        order_no = body.get("out_trade_no", "")
-        if not order_no or "amount" not in body or "notify_url" not in body:
-            self._json(400, {"code": "PARAM_ERROR", "message": "missing out_trade_no/amount/notify_url"})
-            return
-        ORDERS[order_no] = {"amount": body["amount"].get("total"), "notify_url": body["notify_url"]}
-        self._json(200, {
-            "code_url": f"weixin://wxpay/bizpayurl?pr=MOCK{order_no}",
-            "prepay_id": f"MOCKPRE{order_no}",
-        })
-
-    def _wx_refund(self, raw: bytes):
-        """申请退款：验 Authorization 头签名（与 _native 同口径），out_refund_no 幂等。"""
-        auth = parse_auth(self.headers.get("Authorization", ""))
-        if auth is None:
-            self._json(401, {"code": "UNAUTHORIZED", "message": "bad authorization scheme"})
-            return
-        expect = sign("POST", "/v3/refund/domestic/refunds", auth.get("timestamp", ""),
-                      auth.get("nonce_str", ""), raw.decode())
-        if not hmac.compare_digest(expect, auth.get("signature", "")):
-            self._json(401, {"code": "UNAUTHORIZED", "message": "signature mismatch"})
-            return
-        try:
-            body = json.loads(raw.decode())
-        except Exception:
-            self._json(400, {"code": "PARAM_ERROR", "message": "invalid json"})
-            return
-        order_no = body.get("out_trade_no", "")
-        refund_no = body.get("out_refund_no", "")
-        amount = (body.get("amount") or {}).get("refund", 0)
-        if not order_no or not refund_no:
-            self._json(400, {"code": "PARAM_ERROR", "message": "missing out_trade_no/out_refund_no"})
-            return
-        rec = ORDERS.setdefault(order_no, {"amount": None, "notify_url": ""})
-        # out_refund_no 幂等：同号重发返回原退款结果（真实微信同语义）
-        prev = (rec.get("refunds") or {}).get(refund_no)
-        if prev is not None:
-            self._json(200, prev)
-            return
-        rid = f"MOCKRF{abs(hash(refund_no)) % 100000:05d}"
-        out = {
-            "refund_id": rid,
-            "out_refund_no": refund_no,
-            "status": "SUCCESS",
-            "amount": {"refund": int(amount), "currency": "CNY"},
-        }
-        rec.setdefault("refunds", {})[refund_no] = out
-        self._json(200, out)
-
-    def _notify(self, raw: bytes):
-        """代网关向应用投递一次签名回调。body: {notify_url, order_no, amount_cents}"""
-        try:
-            req = json.loads(raw.decode())
-        except Exception:
-            self._json(400, {"err": "invalid json"})
-            return
-        notify_url = req.get("notify_url", "")
-        order_no = req.get("order_no", "")
-        if not notify_url or not order_no:
-            self._json(400, {"err": "missing notify_url/order_no"})
-            return
-        payload = json.dumps({
-            "out_trade_no": order_no,
-            "transaction_id": f"MOCK4200{abs(hash(order_no)) % 100000:05d}",
-            "trade_state": "SUCCESS",
-            "amount": {"total": int(req.get("amount_cents", 0)), "currency": "CNY"},
-            "success_time": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        }, separators=(",", ":"))
-        ts = str(int(time.time()))
-        nonce = f"mock-nonce-{order_no}"
-        sign_hex = sign_notify(ts, nonce, payload)
-        wrapper = {
-            "verify_ts": ts,
-            "verify_nonce": nonce,
-            "verify_sign": sign_hex,
-            "payload": payload,
-        }
-        data = json.dumps(wrapper).encode()
-        http_req = urllib.request.Request(notify_url, data=data, method="POST",
-                                          headers={"Content-Type": "application/json"})
-        try:
-            with NO_PROXY_OPENER.open(http_req, timeout=10) as resp:
-                app_reply = resp.read().decode()
-                app_code = resp.status
-        except URLError as e:
-            self._json(502, {"err": f"app notify_url unreachable: {e}"})
-            return
-        self._json(200, {"delivered": True, "app_status": app_code, "app_reply": app_reply})
 
     # ---------------- PayPal Express Checkout ----------------
 
@@ -268,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
             return False
-        return auth[7:] == PP_ISSUED_TOKEN[0]
+        return auth[7:] in PP_VALID_TOKENS
 
     def _oauth(self, raw: bytes):
         if not self._pp_basic_ok():
@@ -276,6 +128,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         tok = "MOCK-PP-" + secrets.token_hex(8)
         PP_ISSUED_TOKEN[0] = tok
+        PP_VALID_TOKENS.add(tok)
         self._json(200, {"access_token": tok, "token_type": "Bearer", "expires_in": 3600})
 
     def _orders(self, raw: bytes):
@@ -333,9 +186,33 @@ class Handler(BaseHTTPRequestHandler):
             "purchase_units": [{"payments": {"captures": caps}}],
         })
 
+    def _pp_get_capture(self, cid: str):
+        """查捕获：GET /v2/payments/captures/{id}。
+
+        应用侧兜底：用户把「交易号 / Transaction ID」（即捕获 ID）当订单号填入时，
+        订单 GET 回 404 RESOURCE_NOT_FOUND，随后改查本接口，从
+        supplementary_data.related_ids.order_id 反解订单号（对齐真实 PayPal 行为）。
+        """
+        if not self._pp_bearer_ok():
+            self._json(401, {"error": "invalid_token"})
+            return
+        if cid not in PP_CAPTURES:
+            self._json(404, {"name": "RESOURCE_NOT_FOUND",
+                             "details": [{"issue": "INVALID_RESOURCE_ID",
+                                          "description": "Specified resource ID does not exist. Please check the resource ID and try again."}],
+                             "message": "The specified resource does not exist."})
+            return
+        c = PP_CAPTURES[cid]
+        self._json(200, {
+            "id": cid,
+            "status": "REFUNDED" if c["refunded"] else "COMPLETED",
+            "supplementary_data": {"related_ids": {"order_id": c["order_id"]}},
+        })
+
     def _pp_refund(self, raw: bytes, cid: str):
         """退款：POST /v2/payments/captures/{capture_id}/refund。
-        重复退同一捕获回 422（body 含 ALREADY_REFUNDED——应用侧按成功对账）。"""
+        重复退同一捕获回 422（body issue=CAPTURE_FULLY_REFUNDED——与真实沙箱
+        2026-10-17 实证一致；应用侧按成功对账）。"""
         if not self._pp_bearer_ok():
             self._json(401, {"error": "invalid_token"})
             return
@@ -346,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
         if cap["refunded"]:
             self._json(422, {
                 "name": "UNPROCESSABLE_ENTITY",
-                "details": [{"issue": "ALREADY_REFUNDED", "description": "Capture already refunded."}],
+                "details": [{"issue": "CAPTURE_FULLY_REFUNDED",
+                             "description": "The capture has already been fully refunded"}],
             })
             return
         try:
@@ -380,14 +258,14 @@ def main():
     global LISTEN_PORT
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=PORT, help="监听端口（默认 MOCK_PAY_PORT 或 18097）")
-    ap.add_argument("--paypal", action="store_true", help="启用 PayPal 端点（默认即启用，保留向前兼容）")
+    ap.add_argument("--paypal", action="store_true", help="保留向前兼容的 no-op（本网关仅 PayPal）")
     args = ap.parse_args()
     LISTEN_PORT = args.port
     # 绑 0.0.0.0：localhost 仍可用（不影响 e2e），同时允许 Docker 容器经
     # host.docker.internal 回访本网关做实支付联调。
     srv = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)
     sys.stderr.write(f"[mock-gw] listening on 0.0.0.0:{LISTEN_PORT} "
-                     f"(wechat secret len={len(SECRET)}, paypal client={PP_CLIENT_ID.decode()})\n")
+                     f"(paypal client={PP_CLIENT_ID.decode()})\n")
     srv.serve_forever()
 
 

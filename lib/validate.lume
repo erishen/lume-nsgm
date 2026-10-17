@@ -163,10 +163,10 @@ export func validate_config(cfg) {
       p = p + 1;
     }
   }
-  // shop 段（可选）：店面接线校验
+  // shop 段（可选）：店面接线校验（pay 同传：商品快照列要按订单模块校验存在性）
   let shop = get(cfg, "shop", null);
   if (shop != null) {
-    let serrs = validate_shop(shop, mods);
+    let serrs = validate_shop(shop, pay, mods);
     let s2 = 0;
     while (s2 < len(serrs)) {
       push(errs, get(serrs, s2, ""));
@@ -177,115 +177,19 @@ export func validate_config(cfg) {
 }
 
 // pay 段校验（可选；config.pay 缺失时返回空数组）。
-// 约定（见 example-pay.json）：gateway/appid/mchid/serial_no 进 HTTP 头与 body，
-// 形状从紧；secret_env 只给环境变量名，密钥值永不出现在配置/镜像层；
+// 约定（见 example-paypal.json）：client_id（公开标识）进配置；client_secret 只认
+// 环境变量名（secret_env），值绝不进配置/镜像层；mode 限 sandbox|live；
 // order_module + 三个字段名决定回调写哪张表的哪些列，必须真实存在。
+// provider 键（历史遗留）：若存在必须为 "paypal"——微信支付支持已于 2026-10-17
+// 移除（git 历史可查），旧配置在此收到明确报错而非静默走错分支。
 export func validate_pay(pay, mods) {
   let errs = [];
   if (pay == null) { return errs; }
   let at = "pay";
-  let provider = str(get(pay, "provider", "wechat"));
-  if (provider == "paypal") { return validate_pay_paypal(pay, mods); }
-  let req_keys = ["gateway", "appid", "mchid", "serial_no", "secret_env",
-                  "order_module", "order_no_field", "amount_field", "status_field"];
-  let i = 0;
-  while (i < len(req_keys)) {
-    let k = req_keys[i];
-    let v = get(pay, k, null);
-    if (v == null || str(v) == "") {
-      push(errs, at + ": missing required \"" + k + "\"");
-    }
-    i = i + 1;
+  let pv = get(pay, "provider", null);
+  if (pv != null && str(pv) != "paypal") {
+    push(errs, at + ".provider: must be \"paypal\" (got \"" + str(pv) + "\") — wechat support was removed; see git history");
   }
-  // gateway：http(s) URL（原样进 http_post 与 JSON body）
-  let gw = str(get(pay, "gateway", ""));
-  if (gw != "") {
-    if (!contains(gw, "http://") && !contains(gw, "https://")) {
-      push(errs, at + ".gateway: must start with http:// or https:// (got \"" + gw + "\")");
-    }
-    if (contains(gw, " ") || contains(gw, "\"") || contains(gw, "'")) {
-      push(errs, at + ".gateway: must not contain spaces or quotes (got \"" + gw + "\")");
-    }
-  }
-  // 商户标识：令牌形状（进 Authorization 头）
-  let tk = ["appid", "mchid", "serial_no"];
-  i = 0;
-  while (i < len(tk)) {
-    let v = str(get(pay, tk[i], ""));
-    if (v != "" && valid_token(v) == 0) {
-      push(errs, at + "." + tk[i] + ": must match [A-Za-z0-9_-]{1,64} (got \"" + v + "\")");
-    }
-    i = i + 1;
-  }
-  // secret_env：环境变量名（值只在运行环境里）
-  let se = str(get(pay, "secret_env", ""));
-  if (se != "" && valid_env_name(se) == 0) {
-    push(errs, at + ".secret_env: must match [A-Z][A-Z0-9_]* (got \"" + se + "\") — the secret value itself must never appear in config");
-  }
-  // notify_path（可选）：以 / 开头的路径
-  let np = get(pay, "notify_path", null);
-  if (np != null && str(np) != "") {
-    if (substr(str(np), 0, 1) != "/" || contains(str(np), " ") || contains(str(np), "\"")) {
-      push(errs, at + ".notify_path: must be a path starting with \"/\" without spaces/quotes (got \"" + str(np) + "\")");
-    }
-  }
-  // order_module：必须是已定义模块（回调要读写它的表）
-  let om = str(get(pay, "order_module", ""));
-  let order_fields = null;
-  if (om != "") {
-    if (valid_ident(om) == 0) {
-      push(errs, at + ".order_module: must match [a-z][a-z0-9_]* (got \"" + om + "\")");
-    } else {
-      let found = 0;
-      let k = 0;
-      while (k < len(mods)) {
-        let mod = get(mods, k, null);
-        if (mod != null && str(get(mod, "name", "")) == om) {
-          found = 1;
-          order_fields = get(mod, "fields", []);
-        }
-        k = k + 1;
-      }
-      if (found == 0) {
-        push(errs, at + ".order_module: \"" + om + "\" is not a defined module (pay routes read/write that table)");
-      }
-    }
-  }
-  // 三个字段名：标识符形状 + 必须存在于 order_module
-  let fk = ["order_no_field", "amount_field", "status_field"];
-  i = 0;
-  while (i < len(fk)) {
-    let fv = str(get(pay, fk[i], ""));
-    if (fv != "") {
-      if (valid_ident(fv) == 0) {
-        push(errs, at + "." + fk[i] + ": must match [a-z][a-z0-9_]* (got \"" + fv + "\")");
-      } else {
-        if (order_fields != null) {
-          let has = 0;
-          let k = 0;
-          while (k < len(order_fields)) {
-            let f = get(order_fields, k, null);
-            if (f != null && str(get(f, "name", "")) == fv) { has = 1; }
-            k = k + 1;
-          }
-          if (has == 0) {
-            push(errs, at + "." + fk[i] + ": \"" + fv + "\" is not a field of module \"" + om + "\"");
-          }
-        }
-      }
-    }
-    i = i + 1;
-  }
-  return errs;
-}
-
-// PayPal 段校验（provider: paypal）：client_id（公开标识，配置内）/ secret_env
-// （client_secret 的环境变量名，值绝不进配置）/ mode（sandbox|live）/ 订单模块与三字段。
-// order_module + 三字段的校验与微信同逻辑（必须真实存在于 modules）。
-export func validate_pay_paypal(pay, mods) {
-  let errs = [];
-  if (pay == null) { return errs; }
-  let at = "pay";
   let req_keys = ["client_id", "secret_env", "mode",
                   "order_module", "order_no_field", "amount_field", "status_field"];
   let i = 0;
@@ -368,11 +272,10 @@ export func validate_pay_paypal(pay, mods) {
   }
   return errs;
 }
-
 // shop 段校验（可选）：店面接线。product_module 必须存在，name_field/price_field
 // 必须是它的真实字段（生成的 SQL 与购买路由直接引用）；order_module 须与 pay 段的
 // 订单模块一致（店面下单写的就是支付接线的订单表）。
-export func validate_shop(shop, mods) {
+export func validate_shop(shop, pay, mods) {
   let errs = [];
   if (shop == null) { return errs; }
   let pm = str(get(shop, "product_module", ""));
@@ -402,11 +305,70 @@ export func validate_shop(shop, mods) {
       if (!contains(seen, "," + pf + ",")) {
         push(errs, "shop.price_field: \"" + pf + "\" is not a field of module \"" + pm + "\"");
       }
+      // 库存列（可选，P1-2）：必须在商品模块存在；退款回补库存凭订单行商品 id
+      // 定位，故还依赖 product_field（见函数尾部订单模块检查）
+      let skf = str(get(shop, "stock_field", ""));
+      if (skf != "") {
+        if (valid_ident(skf) == 0) {
+          push(errs, "shop.stock_field: \"" + skf + "\" must match [a-z][a-z0-9_]*");
+        } else if (!contains(seen, "," + skf + ",")) {
+          push(errs, "shop.stock_field: \"" + skf + "\" is not a field of module \"" + pm + "\"");
+        }
+      }
     }
     i = i + 1;
   }
   if (found == 0) {
     push(errs, "shop.product_module: \"" + pm + "\" is not a defined module");
+  }
+  // 商品快照列（可选，P1-2）：product_field 存商品 id（无 ik 购买时复用 pending 单、
+  // 退款回补库存靠它定位），product_name_field 存下单时定格商品名。两者必须真实
+  // 存在于订单模块（pay.order_module）——否则下单 INSERT / 回补会打到不存在的列。
+  // pay 缺失时店面不生成，这些键惰性无副作用，跳过检查。
+  let prdf = str(get(shop, "product_field", ""));
+  let pnmf = str(get(shop, "product_name_field", ""));
+  let skf = str(get(shop, "stock_field", ""));
+  if (pay != null && (prdf != "" || pnmf != "" || skf != "")) {
+    let om = str(get(pay, "order_module", ""));
+    let oseen = ",";
+    let ofound = 0;
+    let k = 0;
+    while (k < len(mods)) {
+      let mod2 = get(mods, k, null);
+      if (mod2 != null && str(get(mod2, "name", "")) == om) {
+        ofound = 1;
+        let ofs = get(mod2, "fields", []);
+        let m = 0;
+        while (m < len(ofs)) {
+          let f2 = get(ofs, m, null);
+          if (f2 != null) { oseen = oseen + str(get(f2, "name", "")) + ","; }
+          m = m + 1;
+        }
+      }
+      k = k + 1;
+    }
+    if (ofound == 0) {
+      push(errs, "shop.product_field: order module \"" + om + "\" (pay.order_module) is not a defined module");
+    } else {
+      if (prdf != "") {
+        if (valid_ident(prdf) == 0) {
+          push(errs, "shop.product_field: \"" + prdf + "\" must match [a-z][a-z0-9_]*");
+        } else if (!contains(oseen, "," + prdf + ",")) {
+          push(errs, "shop.product_field: \"" + prdf + "\" is not a field of module \"" + om + "\"");
+        }
+      }
+      if (pnmf != "") {
+        if (valid_ident(pnmf) == 0) {
+          push(errs, "shop.product_name_field: \"" + pnmf + "\" must match [a-z][a-z0-9_]*");
+        } else if (!contains(oseen, "," + pnmf + ",")) {
+          push(errs, "shop.product_name_field: \"" + pnmf + "\" is not a field of module \"" + om + "\"");
+        }
+      }
+      // stock_field 依赖 product_field：退款回补库存凭订单行商品 id 定位商品行
+      if (skf != "" && prdf == "") {
+        push(errs, "shop.stock_field: requires \"product_field\" (refund restocks via the order row's product id)");
+      }
+    }
   }
   return errs;
 }

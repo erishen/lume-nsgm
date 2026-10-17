@@ -1,10 +1,12 @@
-// tests/t7.lume — 支付接线回归测试（P3-4~P3-7）
+// tests/t7.lume — 支付接线回归测试（P3-8 起，微信支付支持已于 2026-10-17 移除）
 //
 // 覆盖三块：
-//   A) scaffold/lib/pay.lume 单元向量：canonical/sign/auth_header/verify_notify/
-//      notify 应答/redirect_html/nonce_str（已知答案向量，与 Python 侧独立实现互证）
-//   B) validate_pay：pay 段必填键、gateway/token/env 名形状、order_module 与
-//      字段必须真实存在、notify_path 形状；pay 缺失时零错误
+//   A) scaffold/lib/pay.lume 单元向量：paypal_base_url / paypal_basic_auth /
+//      paypal_fmt_cents / paypal_verify_webhook（已知答案向量，与 Python 侧独立实现互证）
+//   B) validate_pay：paypal 段必填键、mode/client_id/secret_env 形状、order_module 与
+//      字段必须真实存在、webhook_path 形状、provider 遗留键必须为 paypal；
+//      pay 缺失时零错误；
+//      validate_shop：店面键（含 P1-2 商品快照/库存三键）存在性与依赖校验
 //   C) 字段级 default：单引号字面量放行、注入形状拒绝（DDL 注入面）
 // main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
 
@@ -22,64 +24,10 @@ func any_contains(list, frag): int {
   return 0;
 }
 
-// ---------- A) pay.lume 单元向量 ----------
+// ---------- A) pay.lume 单元向量（PayPal）----------
 
 func main() {
   let f = 0;
-
-  // canonical：v3 五段规范串（方法\n路径\n时间戳\n随机串\n主体\n）
-  let c = pay.canonical("POST", "/v3/pay/native", 1700000000, "n0nce", "{\"a\":1}");
-  f = f + a.assert_true(c == "POST\n/v3/pay/native\n1700000000\nn0nce\n{\"a\":1}\n",
-    "t7: canonical must be method\\npath\\nts\\nnonce\\nbody\\n");
-
-  // sign：已知答案（Python hashlib 独立计算，跨语言互证）
-  f = f + a.assert_true(pay.sign("s3cret", "POST", "/v3/pay/native", 1700000000, "n0nce", "{\"a\":1}")
-      == "9434a549ea8caaa9298603072d3c1cbf8c21b1e44a9e1802f0b1541a8d70f082",
-    "t7: sign known-answer vector");
-
-  // auth_header：v3 形状（算法标签 HMAC；真实微信为 SHA256-RSA）
-  f = f + a.assert_contains(pay.auth_header("1600000000", "SERIAL001", 1700000000, "n0nce", "abcd"),
-    "WECHATPAY2-SHA256-HMAC mchid=\"1600000000\",serial_no=\"SERIAL001\",nonce_str=\"n0nce\",timestamp=\"1700000000\",signature=\"abcd\"",
-    "t7: auth_header v3 shape");
-
-  // verify_notify：正例（Python 侧独立计算的三段规范串签名：ts\nnonce\nbody\n）
-  f = f + a.assert_true(pay.verify_notify("s3cret", "1700000001", "n0nce2", "{\"out_trade_no\":\"X1\"}",
-      "c5cda90bc548924aff71e7ca17584a525ff28f513e118874350b682acbd5705f") == true,
-    "t7: verify_notify known-answer vector");
-  // 负例：错签名 / 空签名都必须拒
-  f = f + a.assert_true(pay.verify_notify("s3cret", "1700000001", "n0nce2", "{\"out_trade_no\":\"X1\"}", "deadbeef") == false,
-    "t7: verify_notify must reject wrong signature");
-  f = f + a.assert_true(pay.verify_notify("s3cret", "1700000001", "n0nce2", "{\"out_trade_no\":\"X1\"}", "") == false,
-    "t7: verify_notify must reject empty signature");
-  // 负例：错密钥（同串不同密钥）必须拒
-  f = f + a.assert_true(pay.verify_notify("wrong-key", "1700000001", "n0nce2", "{\"out_trade_no\":\"X1\"}",
-      "113f8c03295327db0b1bfe970d06acc6c8765697a17a3302b2c77d0ae4ac9e7e") == false,
-    "t7: verify_notify must reject wrong secret");
-
-  // notify 应答形状（v3：code=SUCCESS/FAIL）
-  f = f + a.assert_true(stringify(pay.notify_ok()) == "{\"code\":\"SUCCESS\"}",
-    "t7: notify_ok shape");
-  f = f + a.assert_contains(stringify(pay.notify_fail("bad")), "\"code\":\"FAIL\"",
-    "t7: notify_fail shape");
-
-  // redirect_html：自动提交表单 + 隐藏域 + 转义
-  let html = pay.redirect_html("https://gw.example/pay", { "order_no": "X\"1", "amt": "100" }, "支付<a>");
-  f = f + a.assert_contains(html, "<form method=\"post\" action=\"https://gw.example/pay\">",
-    "t7: redirect_html form action");
-  f = f + a.assert_contains(html, "onload=\"document.forms[0].submit()\"",
-    "t7: redirect_html auto-submit");
-  f = f + a.assert_contains(html, "name=\"order_no\" value=\"X&quot;1\"",
-    "t7: redirect_html hidden input escaped");
-  f = f + a.assert_contains(html, "name=\"amt\" value=\"100\"",
-    "t7: redirect_html hidden input value");
-  f = f + a.assert_contains(html, "<title>支付&lt;a&gt;</title>",
-    "t7: redirect_html title escaped");
-  f = f + a.assert_not_contains(html, "value=\"X\"1\"",
-    "t7: redirect_html must not leak raw quote into attribute");
-
-  // nonce_str：含订单号（秒级时间戳派生，无 random 内建的既定边界）
-  f = f + a.assert_contains(pay.nonce_str("ORD-1"), "ORD-1",
-    "t7: nonce_str must embed order_no");
 
   // ---------- A2) PayPal 单元向量（OAuth2 Basic / 金额格式化 / webhook 验签）----------
   f = f + a.assert_true(pay.paypal_base_url("sandbox") == "https://api-m.sandbox.paypal.com",
@@ -115,95 +63,17 @@ func main() {
       { "name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1 },
       { "name": "order_no", "type": "varchar", "required": 1 },
       { "name": "amount_cents", "type": "integer", "required": 1 },
+      { "name": "product_id", "type": "integer" },
+      { "name": "product_name", "type": "varchar" },
       { "name": "status", "type": "varchar" }
     ] },
     { "name": "product", "fields": [
       { "name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1 },
       { "name": "name", "type": "varchar", "required": 1 },
-      { "name": "price_cents", "type": "integer", "required": 1 }
+      { "name": "price_cents", "type": "integer", "required": 1 },
+      { "name": "stock", "type": "integer" }
     ] }
   ];
-  let good_pay = {
-    "gateway": "https://api.mch.weixin.qq.com",
-    "appid": "wx1234567890abcdef",
-    "mchid": "1600000000",
-    "serial_no": "MOCK_SERIAL_0000000000000000000000000001",
-    "secret_env": "PAY_KEY",
-    "order_module": "order",
-    "order_no_field": "order_no",
-    "amount_field": "amount_cents",
-    "status_field": "status",
-    "notify_path": "/api/pay/notify"
-  };
-  f = f + a.assert_true(len(v.validate_pay(good_pay, mods)) == 0,
-    "t7: valid pay section must pass");
-  f = f + a.assert_true(len(v.validate_pay(null, mods)) == 0,
-    "t7: absent pay section must pass (opt-in)");
-
-  // 缺必填键
-  let no_serial = {
-    "gateway": "https://api.mch.weixin.qq.com", "appid": "wx1", "mchid": "1600000000",
-    "secret_env": "PAY_KEY", "order_module": "order",
-    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status"
-  };
-  f = f + a.assert_true(any_contains(v.validate_pay(no_serial, mods), "missing required \"serial_no\""),
-    "t7: missing serial_no must be reported");
-
-  // gateway 形状
-  let bad_gw = {
-    "gateway": "api.mch.weixin.qq.com", "appid": "wx1", "mchid": "1600000000",
-    "serial_no": "S1", "secret_env": "PAY_KEY", "order_module": "order",
-    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status"
-  };
-  f = f + a.assert_contains(stringify(v.validate_pay(bad_gw, mods)), "gateway: must start with",
-    "t7: gateway without scheme must be reported");
-
-  // token 字符集（进 Authorization 头）
-  let bad_tok = {
-    "gateway": "https://api.mch.weixin.qq.com", "appid": "wx 1", "mchid": "1600000000",
-    "serial_no": "S1", "secret_env": "PAY_KEY", "order_module": "order",
-    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status"
-  };
-  f = f + a.assert_contains(stringify(v.validate_pay(bad_tok, mods)), ".appid: must match [A-Za-z0-9_-]",
-    "t7: appid charset must be enforced");
-
-  // secret_env 环境变量名形状
-  let bad_env = {
-    "gateway": "https://api.mch.weixin.qq.com", "appid": "wx1", "mchid": "1600000000",
-    "serial_no": "S1", "secret_env": "pay-key", "order_module": "order",
-    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status"
-  };
-  f = f + a.assert_contains(stringify(v.validate_pay(bad_env, mods)), ".secret_env: must match [A-Z][A-Z0-9_]*",
-    "t7: secret_env name shape must be enforced");
-
-  // order_module 必须已定义
-  let bad_mod = {
-    "gateway": "https://api.mch.weixin.qq.com", "appid": "wx1", "mchid": "1600000000",
-    "serial_no": "S1", "secret_env": "PAY_KEY", "order_module": "orders",
-    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status"
-  };
-  f = f + a.assert_contains(stringify(v.validate_pay(bad_mod, mods)), "is not a defined module",
-    "t7: unknown order_module must be reported");
-
-  // 字段必须存在于 order_module
-  let bad_field = {
-    "gateway": "https://api.mch.weixin.qq.com", "appid": "wx1", "mchid": "1600000000",
-    "serial_no": "S1", "secret_env": "PAY_KEY", "order_module": "order",
-    "order_no_field": "order_no", "amount_field": "amount", "status_field": "status"
-  };
-  f = f + a.assert_contains(stringify(v.validate_pay(bad_field, mods)), "is not a field of module",
-    "t7: unknown amount_field must be reported");
-
-  // notify_path 形状
-  let bad_np = {
-    "gateway": "https://api.mch.weixin.qq.com", "appid": "wx1", "mchid": "1600000000",
-    "serial_no": "S1", "secret_env": "PAY_KEY", "order_module": "order",
-    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status",
-    "notify_path": "api/pay/notify"
-  };
-  f = f + a.assert_contains(stringify(v.validate_pay(bad_np, mods)), ".notify_path: must be a path",
-    "t7: notify_path must start with /");
-
   // ---------- B2) validate_pay paypal 分支 ----------
   let good_paypal = {
     "provider": "paypal",
@@ -218,6 +88,20 @@ func main() {
   };
   f = f + a.assert_true(len(v.validate_pay(good_paypal, mods)) == 0,
     "t7: valid paypal section must pass");
+
+  // provider 遗留键：微信支付支持已移除，配置里写 wechat 必须收到明确报错
+  // （而非静默走错分支——旧配置升级时的第一道防线）
+  let wx_legacy = {
+    "provider": "wechat", "client_id": "AU1", "secret_env": "PAYPAL_KEY",
+    "mode": "sandbox", "order_module": "order",
+    "order_no_field": "order_no", "amount_field": "amount_cents", "status_field": "status"
+  };
+  f = f + a.assert_true(any_contains(v.validate_pay(wx_legacy, mods),
+      "provider: must be \"paypal\""),
+    "t7: provider=wechat must be rejected (support removed)");
+  // provider=paypal 显式书写仍然放行（向后兼容旧配置）
+  f = f + a.assert_true(len(v.validate_pay(good_paypal, mods)) == 0,
+    "t7: provider=paypal must still pass (legacy key tolerated)");
 
   // 缺必填键（client_id）
   let no_cid = {
@@ -255,7 +139,7 @@ func main() {
   f = f + a.assert_contains(stringify(v.validate_pay(bad_penv, mods)), ".secret_env: must match [A-Z][A-Z0-9_]*",
     "t7: paypal secret_env name shape must be enforced");
 
-  // order_module/字段同微信逻辑
+  // order_module/字段存在性（与 paypal 主路径同口径）
   let bad_pmod = {
     "provider": "paypal", "client_id": "AU1", "secret_env": "PAYPAL_KEY",
     "mode": "sandbox", "order_module": "orders",
@@ -283,19 +167,53 @@ func main() {
 
   // ---------- B3) validate_shop ----------
   let good_shop = { "product_module": "product", "order_module": "order", "name_field": "name", "price_field": "price_cents" };
-  f = f + a.assert_true(len(v.validate_shop(good_shop, mods)) == 0,
+  f = f + a.assert_true(len(v.validate_shop(good_shop, null, mods)) == 0,
     "t7: valid shop section must pass");
-  f = f + a.assert_true(len(v.validate_shop(null, mods)) == 0,
+  f = f + a.assert_true(len(v.validate_shop(null, null, mods)) == 0,
     "t7: null shop must pass (optional section)");
   let no_pm = { "order_module": "order" };
-  f = f + a.assert_true(any_contains(v.validate_shop(no_pm, mods), "missing required \"product_module\""),
+  f = f + a.assert_true(any_contains(v.validate_shop(no_pm, null, mods), "missing required \"product_module\""),
     "t7: shop without product_module must be reported");
   let bad_pm = { "product_module": "products", "order_module": "order" };
-  f = f + a.assert_true(any_contains(v.validate_shop(bad_pm, mods), "is not a defined module"),
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_pm, null, mods), "is not a defined module"),
     "t7: shop unknown product_module must be reported");
   let bad_pf = { "product_module": "product", "order_module": "order", "price_field": "price" };
-  f = f + a.assert_true(any_contains(v.validate_shop(bad_pf, mods), "price_field: \"price\" is not a field"),
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_pf, null, mods), "price_field: \"price\" is not a field"),
     "t7: shop unknown price_field must be reported");
+
+  // ---------- B4) validate_shop 商品快照/库存键（P1-2）----------
+  // 三键齐配（pay 提供订单模块）放行；各键不存在/缺依赖/形状错都要报
+  let good_stock = {
+    "product_module": "product", "order_module": "order",
+    "name_field": "name", "price_field": "price_cents",
+    "stock_field": "stock", "product_field": "product_id", "product_name_field": "product_name"
+  };
+  f = f + a.assert_true(len(v.validate_shop(good_stock, good_paypal, mods)) == 0,
+    "t7: shop with stock/product snapshot keys must pass");
+  let bad_skf = { "product_module": "product", "order_module": "order",
+                  "stock_field": "stockx", "product_field": "product_id" };
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_skf, good_paypal, mods),
+      "stock_field: \"stockx\" is not a field"),
+    "t7: shop unknown stock_field must be reported");
+  let skf_no_prdf = { "product_module": "product", "order_module": "order", "stock_field": "stock" };
+  f = f + a.assert_true(any_contains(v.validate_shop(skf_no_prdf, good_paypal, mods),
+      "stock_field: requires \"product_field\""),
+    "t7: shop stock_field without product_field must be reported");
+  let bad_prdf = { "product_module": "product", "order_module": "order", "product_field": "pid_x" };
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_prdf, good_paypal, mods),
+      "product_field: \"pid_x\" is not a field of module \"order\""),
+    "t7: shop unknown product_field must be reported");
+  let bad_pnmf = { "product_module": "product", "order_module": "order", "product_name_field": "pname_x" };
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_pnmf, good_paypal, mods),
+      "product_name_field: \"pname_x\" is not a field"),
+    "t7: shop unknown product_name_field must be reported");
+  let bad_prdf_id = { "product_module": "product", "order_module": "order", "product_field": "Product-Id" };
+  f = f + a.assert_true(any_contains(v.validate_shop(bad_prdf_id, good_paypal, mods),
+      "product_field: \"Product-Id\" must match"),
+    "t7: shop product_field ident shape must be enforced");
+  // pay 缺失时店面不生成，新键惰性无副作用
+  f = f + a.assert_true(len(v.validate_shop(good_stock, null, mods)) == 0,
+    "t7: shop snapshot keys inert without pay");
 
   // ---------- C) 字段级 default ----------
 

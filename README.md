@@ -59,7 +59,7 @@ lume-nsgm/
 │   └── base.lume        # 运行时内建辅助引用（SQL / JSON / 路由常量）
 ├── scaffold/            # 工程基座静态模板（复制进 gen/）
 │   ├── lib/db.lume      # SQLite 存取辅助（dsn / init / 分页 / 计数）
-│   ├── lib/pay.lume     # 支付库（provider: wechat|paypal）：v3 签名/下单/回调验签/跳转 + PayPal OAuth2 建单/捕获/webhook 验签（复制进 gen/）
+│   ├── lib/pay.lume     # 支付库（PayPal Express Checkout）：OAuth2 取 token / 建单 / 捕获 / 查单 / 查捕获 / webhook 验签 / 退款（复制进 gen/）
 │   ├── web/             # Vite + React + TS 静态壳（package.json / vite / tsconfig / main / api）
 │   └── www/             # SSR 静态样式 + 回退 JS（app.css / app.js）
 └── tests/
@@ -71,10 +71,10 @@ lume-nsgm/
     ├── t6.lume          # schema 校验回归断言（16 断言，validate.lume）
     └── t7.lume          # 支付回归断言（签名向量 / validate_pay / 字段 default）
 ├── scripts/
-│   ├── mock_pay_gateway.py  # 模拟微信支付 v3 网关（独立 HMAC 实现，交叉验证）
+│   ├── mock_pay_gateway.py  # 模拟 PayPal 网关（OAuth2/建单/捕获/查单/查捕获/退款，独立实现与 lume 侧交叉验证）
 │   └── e2e.sh          # 端到端探针：起生成工程 + curl 跑 SSR/CRUD/搜索/分页/迁移/支付
 ├── Dockerfile / docker-compose.yml / docker-build.sh   # 容器化部署（见「Docker 部署」）
-├── example-config.json / example-pay.json / example-paypal.json  # 批量生成配置（普通 / 微信支付 / PayPal 支付变体）
+├── example-config.json / example-paypal.json  # 批量生成配置（普通 / PayPal 支付变体）
 └── .env.example        # .env 模板（LUME_CORE_BIN 路径；.env 本体进 .gitignore）
 ```
 
@@ -273,50 +273,29 @@ docker run --rm -p 18081:18081 -v lume-nsgm-data:/app/data lume-nsgm-app:latest
 
 - **健康检查**：compose 带 `healthcheck`（每 30s 探 `GET /`，两种构建配置的工程都有该路由，`docker compose ps` 可见 `healthy`）
 - **schema 演进**：改字段后重新 `make docker-build`，容器重启时自动 `ALTER TABLE ADD COLUMN` 补齐缺失列，数据卷里的旧数据不丢
-- **支付变体构建**：`docker build --build-arg NSGM_CONFIG=example-pay.json -t lume-nsgm-app:pay .`（微信）或 `NSGM_CONFIG=example-paypal.json -t lume-nsgm-app:paypal .`（PayPal），构建上下文同 `work/lume`）——镜像内跑的是带支付路由的生成工程，商户密钥等敏感项仍走环境变量注入（`PAY_KEY` / `PAYPAL_KEY` 等），不进镜像层
+- **支付变体构建**：`docker build --build-arg NSGM_CONFIG=example-paypal.json -t lume-nsgm-app:paypal .`（构建上下文同 `work/lume`）——镜像内跑的是带 PayPal 支付路由的生成工程，client_secret 等敏感项仍走环境变量注入（`PAYPAL_KEY` 等），不进镜像层
 
 数据持久化：SQLite 文件落在容器内 `/app/data/app.db`，已挂为命名卷 `nsgm-data`
 （可用环境变量 `NSGM_DB` 覆盖路径）。
 
-## 支付（provider: wechat | paypal，沙箱 mock 全链路）
+## 支付（PayPal Express Checkout，沙箱 mock 全链路）
 
-在普通 CRUD 生成能力之上，nsgm 可生成**带支付闭环的电商工程**：下单签名 →
-扫码/跳转 → 回调验签 → 订单状态流转。`pay` 段用 `provider` 选择支付通道，
-目前支持**微信支付 v3**（`provider: wechat`，默认）与 **PayPal Express Checkout**
-（`provider: paypal`）。用法是换一份带 `pay` 段的配置：
+在普通 CRUD 生成能力之上，nsgm 可生成**带支付闭环的电商工程**：下单 → 跳转
+approve → 回调捕获 → 订单状态流转。用法是换一份带 `pay` 段的配置
+（`example-paypal.json`）：
 
 ```bash
-# 微信（默认）：example-pay.json —— order 模块 + pay 段
-lume-core main.lume example-pay.json
-PAY_KEY=<商户密钥> lume-core gen/app.lume
-python3 scripts/mock_pay_gateway.py --port 18097
-
-# PayPal：example-paypal.json —— order 模块 + pay 段（provider: paypal）
-# （示例配置默认都产出到 gen/；要两变体并存可复制配置改 out，e2e 即这么做的）
 lume-core main.lume example-paypal.json
 PAYPAL_KEY=<沙箱密钥> lume-core gen/app.lume
-python3 scripts/mock_pay_gateway.py --paypal --port 18097
+python3 scripts/mock_pay_gateway.py --port 18097
 ```
 
-> mock 网关默认凭证（应用侧与网关侧必须对齐，否则验签/认证失败）：微信
-> `MOCK_PAY_SECRET=mock-secret`（对应 `PAY_KEY`）；PayPal
+> mock 网关默认凭证（应用侧与网关侧必须对齐，否则认证失败）：
 > `MOCK_PAYPAL_CLIENT_ID=AUmock_client_id_sandbox_001` /
 > `MOCK_PAYPAL_CLIENT_SECRET=e2e-mock-key`（对应配置 `client_id` 与
 > `PAYPAL_KEY`）。换值需两边同时改。
 
-配置的 `pay` 段（`lib/validate.lume` 的 `validate_pay` 全量校验，`provider` 决定走哪条校验分支）：
-
-**微信（`provider: wechat`，默认）**
-
-| 键 | 含义 |
-|---|---|
-| `gateway` | 网关地址（`http://127.0.0.1:18097` 打 mock；真实环境填微信域名） |
-| `appid` / `mchid` / `serial_no` | 应用 ID / 商户号 / 证书序列号 |
-| `secret_env` | **商户密钥的环境变量名**（如 `PAY_KEY`）——生成代码 `env("<name>")` 读取，密钥不写进配置与产物 |
-| `order_module` / `order_no_field` / `amount_field` / `status_field` | 订单表与字段绑定（四个名字必须已定义） |
-| `notify_path` | 回调路由（默认 `/api/pay/notify`） |
-
-**PayPal（`provider: paypal`）**
+配置的 `pay` 段（`lib/validate.lume` 的 `validate_pay` 全量校验）：
 
 | 键 | 含义 |
 |---|---|
@@ -325,87 +304,73 @@ python3 scripts/mock_pay_gateway.py --paypal --port 18097
 | `mode` | `sandbox` / `live`（决定 `api-m.sandbox.paypal.com` 还是 `api-m.paypal.com`） |
 | `order_module` / `order_no_field` / `amount_field` / `status_field` | 订单表与字段绑定（四个名字必须已定义） |
 | `webhook_path` | 可选，异步事件路由（默认不生成；配置后生成 `post "<webhook_path>"`） |
-| `currency` / `brand` | 可选，默认 `USD` / `lume-nsgm` |
+| `currency` / `currency_symbol` / `brand` | 可选，默认 `USD` / `$` / `lume-nsgm`；`currency_symbol` 决定店面 / 后台 / 收银台 / 回跳页的金额符号（已改为配置驱动，原先硬编码 `$`） |
 
-> ⚠️ **`secret_env` 取名避坑（两通道通用）**：lume-core 的 `env()` 会**掩码**名字含
+> ⚠️ **`secret_env` 取名避坑**：lume-core 的 `env()` 会**掩码**名字含
 > `API_KEY` / `SECRET` / `PASSWORD` / `PASSWD` / `TOKEN` / `CREDENTIAL` 子串（大小写
 > 不敏感）的变量——读到的是 null，与未设置同形（`src/builtins_fs.c` 的
-> `env_is_sensitive`，防止脚本外泄凭证）。所以微信用 `PAY_KEY`、PayPal 用
-> `PAYPAL_KEY`；**不要**叫 `PAYPAL_CLIENT_SECRET`（PayPal e2e 曾因此 401：
-> 空 secret 过 Basic 校验失败）。
+> `env_is_sensitive`，防止脚本外泄凭证）。所以 PayPal 用 `PAYPAL_KEY`；
+> **不要**叫 `PAYPAL_CLIENT_SECRET`（PayPal e2e 曾因此 401：空 secret 过 Basic
+> 校验失败）。
 
-生成工程比普通工程多两条路由 + 一个 `lib/pay.lume`：
-
-- `POST /api/pay/create`：读订单 → `pay.create_native`（`hmac_sha256` 签名调
-  `POST {gateway}/v3/pay/native`）→ 返回 `code_url`（Native 下单标准返回）
-- `POST /api/pay/notify`：验签 → `status` 仅允许 `pending → paid` 流转（幂等，
-  重复回调返回 SUCCESS 但不重复落库）
-
-`lib/pay.lume` 导出的纯函数（`tests/t7.lume` 用 RFC 4231 已知向量固化）：
-
-```lume
-pay.canonical(method, path, ts, nonce, body)   // 请求串：method\npath\nts\nnonce\nbody\n
-pay.sign(secret, method, path, ts, nonce, body) // HMAC-SHA256 hex
-pay.auth_header(mchid, serial, ts, nonce, hex)  // Authorization 头
-pay.verify_notify(secret, ts, nonce, body, hex) // 回调验签（timestamp\nnonce\nbody\n）
-pay.redirect_html(action, fields, title)        // 自动提交表单（302 变通，见 S3）
-```
-
-已知边界（详见 TODO.md「已知边界」）：
-
-- **S3 响应无 302/头控制** ⇒ 跳转走自动提交表单（恰好是 Native 支付标准姿势）
-- **S7 回调无请求头**：`req` 对象不带 headers，验签三要素（timestamp / nonce /
-  signature）由网关放进 body 的 `verify_ts` / `verify_nonce` / `verify_sign` 字段
-- **S8 无随机源**：nonce 派生为 `order_no + "-" + str(now())`；真实微信要求
-  SHA256-**RSA** 签名（需平台证书），当前 `hmac_sha256` 方案面向 mock/自建网关，
-  上生产前要么补 RSA 内建、要么外挂本地签名 sidecar（`http_post` 带
-  `allow_private: true` 打本地服务）
-
-回归：`make test` 含 t7（签名向量 / validate_pay / 字段 default）；`make test-e2e`
-固化沙箱全链路——建单 → 签名下单 → code_url → 篡改签名拒 → 正确回调 →
-`status:"paid"` → 重复回调幂等。
-
-### PayPal Express Checkout（provider: paypal）
-
-流程与微信不同——是**浏览器跳转**而非扫码：下单拿 `approve_url` → 前端
-`window.location` 跳转 → 用户在 PayPal approve → PayPal 跳回
-`return_url?token=<paypal_order_id>&order_no=<本地单号>` → 服务端 `capture` 捕获 →
-改本单状态。生成工程比微信多四条路由 + `lib/pay.lume` 的 PayPal 适配器：
+生成工程比普通工程多四条路由 + 一个 `lib/pay.lume`：
 
 - `POST /api/pay/create`：读订单 → `pay.paypal_token`（OAuth2 `client_credentials`
   取 Bearer，模块级缓存约 8h）→ `pay.paypal_create`（`POST /v2/checkout/orders`，
   intent=CAPTURE）→ 返回 JSON `{ ok, approve_url, paypal_order_id }`（前端据此跳转）
 - `GET /api/pay/return`：从 `req.query_params` 取 `token` 与 `order_no` → `pay.paypal_capture`
-  （`POST .../capture`）→ 改 `status` 为 `paid`（幂等，已 paid 直接回成功页）
+  （`POST .../capture`）→ 改 `status` 为 `paid`（幂等，已 paid 直接回成功页；
+  捕获成功回填 `paypal_order_id` + `capture_id`）
 - `GET /api/pay/cancel`：用户取消，返回取消页
 - `POST /api/pay/webhook`（可选）：`pay.paypal_verify_webhook` 简化 HMAC 验签
 
-`lib/pay.lume` 导出的 PayPal 纯函数（`tests/t7.lume` 已知向量固化）：
+`lib/pay.lume` 导出的纯函数（`tests/t7.lume` 已知向量固化）：
 
 ```lume
 pay.paypal_base_url(mode)              // sandbox/live → base URL
 pay.paypal_basic_auth(id, secret)     // "Basic " + base64(id:secret)（RFC7617）
 pay.paypal_fmt_cents(cents)           // 整数分 → "x.xx"（无浮点）
+pay.fmt_cents(cents)                  // 金额展示别名（店面/后台通用）
 pay.paypal_token(cfg)                 // OAuth2 client_credentials → { ok, token }
 pay.paypal_create(cfg, token, no, cents, desc, ret, cancel) // → { ok, approve_url, paypal_order_id }
+pay.paypal_approve_url(cfg, ppid)     // 由订单 ID 重建 approve 链接（收银台复用）
 pay.paypal_capture(cfg, token, pp_order_id)                   // → { ok, status, capture_id }
+pay.paypal_get_order(cfg, token, pp_order_id)                 // 查单（退款反查 capture_id 兜底）
+pay.paypal_get_capture(cfg, token, capture_id)                // 查捕获（订单 GET 404 后的兜底：related_ids.order_id 反解订单号）
+pay.paypal_refund(cfg, token, capture_id, cents, note)        // 退款（捕获级）
 pay.paypal_verify_webhook(secret, id, ts, body, sign_hex)    // HMAC(id\n+ts\n+body\n)
 ```
 
-PayPal 专属边界（详见 TODO.md P3-8）：
+已知边界（详见 TODO.md S7）：
 
 - **webhook 验签简化**：真实 PayPal webhook 签名含 `crc32(body)`（core 暂无 crc32
   内建），本库 `paypal_verify_webhook` 为纯 HMAC 沙箱等价实现；验签三要素
-  （`verify_id` / `verify_ts` / `verify_sign`）随 body 传递，共用 S7 边界
+  （`verify_id` / `verify_ts` / `verify_sign`）随 body 传递
 - **return 走 query_params**：PayPal 跳回带 `?token=...`，`req.query_params` 已
   URL 解码可直接读（同 SSR 表单约定）；创建时把本地 `order_no` 编码进 `return_url`
   本身，避免服务端存 PayPal 订单 ID → 本地单号映射
 - **OAuth2 比 SHA256-RSA 易内嵌**：PayPal 的 HTTP Basic 凭证只需 `base64_encode`
-  （P3-1 内建），无需 RSA 内建，这是选 PayPal 作为第二通道的动因
+  内建，这是选 PayPal 作为支付通道的动因
+- **无随机源**：业务单号由生成器派生（`order_no + now()`），沙箱够用
+- **重复退款 422 的 issue 编码不唯一**（2026-10-17 真实沙箱实证）：已全额退的捕获
+  再退返回 `CAPTURE_FULLY_REFUNDED`（文档/旧 mock 写的 `ALREADY_REFUNDED` 反而
+  不出现），`paypal_refund` 对 `ALREADY_REFUNDED` / `CAPTURE_FULLY_REFUNDED` /
+  `REFUND_ALREADY_EXISTS` / `DUPLICATE` 一并按成功对账，避免「其实已退成功」
+  显示成假失败
+- **订单号 ≠ 交易号**：PayPal 后台的「交易号 / Transaction ID」是**捕获 ID**，
+  当订单号填进 `GET /v2/checkout/orders/{id}` 会回 404
+  `RESOURCE_NOT_FOUND`/`INVALID_RESOURCE_ID`（2026-10-17 真实沙箱实证）——
+  退款路由订单反查 404 后自动改查 `GET /v2/payments/captures/{id}`，用
+  `supplementary_data.related_ids.order_id` 反解真实订单号，两列都回填正确值
 
-回归：`make test` 含 t7（PayPal 已知向量 / validate_pay paypal 分支 / 字段 default）；
+回归：`make test` 含 t7（PayPal 已知向量 / validate_pay / 字段 default）；
 `make test-e2e` 固化 PayPal 沙箱全链路——建单 → approve_url → return 捕获 →
-`status:"paid"` → 重复 return 幂等。
+`status:"paid"` → 重复 return 幂等 → webhook 验签 → 收银台复用防孤儿单 →
+退款与库存回补 → **早期订单双空关联 ID 恢复**（`need_recover` 提示 → `/shop/recover/:ono`
+表单 `capid` 直达 / `ppid` 反查 / `manual` 本地标记 / **交易号（捕获 ID）填进订单号框
+自动改查捕获接口**四条路径均落库 `refunded`）→ **商品目录示例播种与清空重载**
+（空表自动播种 → `?act=clear` 清空且订单不受影响 → 不自动复活 → `?act=seed` 手动重载 →
+非空守卫）。
 
 ### 店面（shop 段，面向顾客的电商前端）
 
@@ -414,26 +379,50 @@ pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay`
 
 | 路由 | 行为 |
 |---|---|
-| `get /shop` | 商品卡片列表（名称/价格 分→元/描述）；**空表自动播种 3 个演示商品**，可在后台 `<product_module>` 里增删改 |
-| `get /shop/buy/:id` | 下单：写 `<order_module>` 一行（`SHOP-<ts>-<pid>`，status=pending）→ 跳收银台 |
-| `get /shop/pay/:ono` | 收银台：微信展示 `code_url`（扫码）；PayPal 展示 `approve_url` 跳转链接 |
-| `get /shop/mock-pay/:ono` | **仅微信生成，demo 专用**：应用请求 mock 网关 `/mock/notify` 代投递签名回调（真实环境由微信服务器打 notify） |
-| `get /shop/result/:ono` | 支付结果页（paid → 成功；pending → 继续支付） |
+| `get /shop` | 商品卡片列表（名称/价格 分→元/描述/库存）；**新库空表一次性播种演示商品**（配了 `stock_field` 时播 10/5/0 三档，直接演示售罄态），可在后台 `<product_module>` 里增删改。页内带「**清空商品**」按钮（confirm 后走 `?act=clear`，逐行参数化删——`sql_write` 护栏禁无 WHERE 的 DELETE；订单记录不受影响）；清空后落「已播种」标记（`_nsgm_shop_meta` 元表），**不再自动复活**，空态给出「载入示例商品」（`?act=seed`，仅空表时播种）。清空/重载并回本路由不单独占路由位：lume-core 解释器路由表上限 32 条（`MAX_AL_ROUTES`），PayPal 变体已逼近 |
+| `get /shop/buy/:id?ik=` | 下单扣库存（补偿模式，见下）→ 跳收银台；`ik` 幂等键防重复下单 |
+| `get /shop/pay/:ono` | 收银台：**复用**订单已存的 `paypal_order_id` 重建 approve 链接——重复渲染不重复建单（防孤儿单） |
+| `get /shop/result/:ono` | 支付结果页（paid → 成功并显示金额；pending → 继续支付） |
+| `get /shop/refund/:ono` | 退款：确认页 `?confirm=1` 执行；仅 `paid` 可退、重复退幂等；**网关退款成功后回补库存 +1**。关联 ID 归一（`paypal_order_id`/`capture_id` SQL NULL 读作 lume null 先归一）；旧单缺 `capture_id` 时由 `pay.paypal_get_order` 反查兜底——订单 GET 404（填的是交易号/捕获 ID）自动改查 `pay.paypal_get_capture`，反解真实订单号后继续退款 |
+| `get /shop/recover/:ono` | **早期订单恢复关联 ID**（迁移补列前 `paypal_order_id` 与 `capture_id` 均 NULL 的早期订单）：订单号框填 PayPal 订单号**或交易号（捕获 ID，自动识别）**反查捕获记录，或直接填捕获 ID（直达退款），或标记「已在 PayPal 后台手动退款」本地落库（不调 API）。退款成功回填关联 ID（反解出的真实订单号 + 捕获 ID），使后续操作一致 |
 
-配置（`example-pay.json`）：
+配置（`example-paypal.json`）：
 
 ```json
 "shop": {
   "product_module": "product",
   "order_module": "order",
   "name_field": "name",
-  "price_field": "price_cents"
+  "price_field": "price_cents",
+  "stock_field": "stock",
+  "product_field": "product_id",
+  "product_name_field": "product_name"
 }
 ```
 
-`validate_shop`（lib/validate.lume）校验 product_module 必须已定义、name/price
-字段必须真实存在；店面下单写的就是 pay 段绑定的订单表，回调复用支付接线的
-验签/幂等/落库逻辑——**店面与支付共享同一条状态流转链路**。
+`validate_shop`（lib/validate.lume）校验：product_module 必须已定义；name/price
+字段必须真实存在；`stock_field` 依赖 `product_field`（回补库存要凭订单行定位商品行）；
+`product_field` / `product_name_field` 必须在 `pay.order_module` 已定义且形状合法。
+店面下单写的就是 pay 段绑定的订单表，回调复用支付接线的验签/幂等/落库逻辑——
+**店面与支付共享同一条状态流转链路**。
+
+**下单扣库存（补偿模式，TODO P1-2）**：无事务（S2）下按
+① INSERT 订单（含 `product_id` / `product_name` 商品快照，配了字段时）
+② `UPDATE product SET stock = stock - 1 WHERE id = ? AND stock >= 1`（单条原子语句即库存守卫，
+`sql_write` 返回受影响行数，0 = 售罄/并发被抢）
+③ 0 行则补偿 DELETE 该 pending 单并返回「已售罄」页（按钮同时置灰不可点）。
+选 INSERT-first 而非先扣后建：守卫 UPDATE 才是原子库存操作，且避免「货扣了单没建」的悬挂。
+配了 `product_field` 时，同 `ik` 的重复下单复用最近一笔 pending 单（不依赖唯一索引）。
+
+**PayPal 收银台复用（防孤儿单）**：`/shop/pay/:ono` 每次渲染时，若订单已有
+`paypal_order_id` 就直接按订单 ID 重建 approve 链接（mock 网关：
+`{gateway}/mock/paypal/approve?token=<订单ID>`；真实：
+`https://{www|www.sandbox}.paypal.com/checkoutnow?token=<订单ID>`），不再调建单接口；
+建单成功即把 `paypal_order_id` 回填订单行（该列由自动迁移补出）。
+
+**迁移注意**：旧库升级后 `product.stock` 列为 SQL NULL——lume 侧 `str(null)` 是字面量
+`"null"` 而非空串（店面商品卡 / 后台列表 / 表单预填均已做归一，不会渲染出 `null`），
+但**演示商品要在后台把库存补上**，否则购买会被守卫 UPDATE 判 0 行拒单。
 
 ## 字段定义（example-config.json）
 

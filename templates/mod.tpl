@@ -96,13 +96,36 @@ func list_body(qp) {
     + "<a class=\"btn primary push\" href=\"/{{ctrl}}/new\">+ 新增</a>"
     + "</form>\n";
 
-  body = body + "<div class=\"table-wrap\"><table class=\"grid\"><thead><tr>";
-  let ncols = 1;
+  // 计算需显示的列表列：list==1 且当前页至少一行有值；全空列（如未走店面的
+  // product_id / product_name / paypal_order_id）不渲染，避免无意义空白占宽。
+  // 无行时展示全部表头，保证空态表格整齐。
+  let vis = [];
   let i = 0;
   while (i < len(FIELDS)) {
     let f = FIELDS[i];
-    if (get(f, "list", 0) == 1) { body = body + "<th>" + ui.esc(get(f, "label", "")) + "</th>"; ncols = ncols + 1; }
+    if (get(f, "list", 0) == 1) {
+      let any_val = 0;
+      if (len(items) == 0) { any_val = 1; }
+      else {
+        let k = 0;
+        while (k < len(items)) {
+          let rv = str(get(items[k], get(f, "name", ""), ""));
+          if (rv != "" && rv != "null") { any_val = 1; break; }
+          k = k + 1;
+        }
+      }
+      if (any_val == 1) { push(vis, i); }
+    }
     i = i + 1;
+  }
+  let ncols = len(vis) + 1;
+
+  body = body + "<div class=\"table-wrap\"><table class=\"grid\"><thead><tr>";
+  let vi = 0;
+  while (vi < len(vis)) {
+    let f = FIELDS[vis[vi]];
+    body = body + "<th>" + ui.esc(get(f, "label", "")) + "</th>";
+    vi = vi + 1;
   }
   body = body + "<th class=\"op\">操作</th></tr></thead><tbody>\n";
 
@@ -124,31 +147,32 @@ func list_body(qp) {
     let r = items[i];
     body = body + "<tr>";
     let j = 0;
-    while (j < len(FIELDS)) {
-      let f = FIELDS[j];
-      if (get(f, "list", 0) == 1) {
-        let v = str(get(r, get(f, "name", ""), ""));
-        let ffmt = str(get(f, "fmt", ""));
-        if (ffmt == "money" && v != "" && v != "null") {
-          // *_cents 字段：分 -> 元（tabular-nums 对齐，货币符号随店面 provider）
-          let c = int(v);
-          let tail = str(c % 100);
-          if (c % 100 < 10) { tail = "0" + tail; }
-          body = body + "<td class=\"money\">{{cur_sym}}" + str(int(c / 100)) + "." + tail + "</td>";
-        } else if (ffmt == "st") {
-          // status 字段：paid=绿 pending=黄 refunded=灰（未知值=蓝）
-          let sc = "st-info";
-          if (v == "paid") { sc = "st-ok"; }
-          if (v == "pending") { sc = "st-warn"; }
-          if (v == "refunded") { sc = "st-mut"; }
-          body = body + "<td><span class=\"st " + sc + "\">" + ui.esc(v) + "</span></td>";
-        } else {
-        // 时间列暴露原始值（data-ts），由 app.js 转本地友好格式
-        let ts_attr = "";
-        let ft = get(f, "type", "");
-        if (ft == "timestamp" || ft == "date") { ts_attr = " data-ts=\"" + ui.esc(v) + "\""; }
-        body = body + "<td" + ts_attr + ">" + ui.esc(v) + "</td>";
-        }
+    while (j < len(vis)) {
+      let f = FIELDS[vis[j]];
+      let v = str(get(r, get(f, "name", ""), ""));
+      // 迁移补列（ALTER ADD COLUMN 无默认值）的旧行读出是 SQL NULL -> lume null，
+      // str(null) 得字面量 "null"——非空串，会骗过 == "" 守卫渲染出 "null"，先归一
+      if (v == "null") { v = ""; }
+      let ffmt = str(get(f, "fmt", ""));
+      if (ffmt == "money" && v != "" && v != "null") {
+        // *_cents 字段：分 -> 元（tabular-nums 对齐，货币符号随店面 provider）
+        let c = int(v);
+        let tail = str(c % 100);
+        if (c % 100 < 10) { tail = "0" + tail; }
+        body = body + "<td class=\"money\">{{cur_sym}}" + str(int(c / 100)) + "." + tail + "</td>";
+      } else if (ffmt == "st") {
+        // status 字段：paid=绿 pending=黄 refunded=灰（未知值=蓝）
+        let sc = "st-info";
+        if (v == "paid") { sc = "st-ok"; }
+        if (v == "pending") { sc = "st-warn"; }
+        if (v == "refunded") { sc = "st-mut"; }
+        body = body + "<td><span class=\"st " + sc + "\">" + ui.esc(v) + "</span></td>";
+      } else {
+      // 时间列暴露原始值（data-ts），由 app.js 转本地友好格式
+      let ts_attr = "";
+      let ft = get(f, "type", "");
+      if (ft == "timestamp" || ft == "date") { ts_attr = " data-ts=\"" + ui.esc(v) + "\""; }
+      body = body + "<td" + ts_attr + ">" + ui.esc(v) + "</td>";
       }
       j = j + 1;
     }
@@ -199,10 +223,13 @@ func form_page(id: int, vals, msg: string): string {
     let f = FIELDS[i];
     if (get(f, "form", 0) == 1) {
       let req = get(f, "required", 0) == 1;
+      // NULL 归一（同列表列）：编辑页预填不能把 "null" 字面量写进输入框
+      let fv = str(get(vals, get(f, "name", ""), ""));
+      if (fv == "null") { fv = ""; }
       body = body + "  <label>" + ui.esc(get(f, "label", ""))
         + (req ? "<span class=\"req\"> *</span>" : "") + "\n"
         + "    <input name=\"" + get(f, "name", "") + "\" value=\""
-        + ui.esc(str(get(vals, get(f, "name", ""), ""))) + "\""
+        + ui.esc(fv) + "\""
         + (req ? " required" : "") + ">\n  </label>\n";
     }
     i = i + 1;
