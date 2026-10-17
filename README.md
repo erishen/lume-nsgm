@@ -79,7 +79,12 @@ lume-nsgm/
 │   ├── check-privacy.py     # pre-publish privacy self-check (local paths / private workspace names / credential forms in tracked files)
 │   └── e2e.sh          # e2e probes: boot the generated project + curl through SSR/CRUD/search/pagination/migration/payment
 ├── Dockerfile / docker-compose.yml / docker-build.sh   # containerized deployment (see "Docker deployment")
-├── example-config.json / example-paypal.json  # batch generation configs (plain / PayPal payment variant)
+├── example-paypal.json # PayPal payment variant generation config (the plain variant is example-config.json above)
+├── Makefile            # task entry: create / init / run / serve / dev / check / test / test-e2e / check-privacy / docker-* / clean
+├── .gitignore          # ignore scope: .env / gen/ (default output) / gen-paypal/ (e2e scratch output)
+├── TODO.md             # roadmap and known boundaries
+├── SECURITY.md         # vulnerability reporting policy
+├── LICENSE             # MIT
 └── .env.example        # .env template (LUME_CORE_BIN path; the .env file itself is git-ignored)
 ```
 
@@ -138,6 +143,8 @@ Pick one of two ways:
    ```
 
    The Makefile already resolves this via `-include .env` + `$(or $(LUME_CORE_BIN),lume-core)`: with a `.env`, its absolute path wins; without one, it falls back to `lume-core` on PATH.
+
+  > `.env` is the only file read here — nothing in this repo loads `.env.local` (a Vite convention); putting the path there would silently do nothing.
 
 ## Usage
 

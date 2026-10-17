@@ -77,7 +77,12 @@ lume-nsgm/
 │   ├── check-privacy.py     # 发布前隐私自检（跟踪文件里的本机路径/私有工作区名/凭据形态）
 │   └── e2e.sh          # 端到端探针：起生成工程 + curl 跑 SSR/CRUD/搜索/分页/迁移/支付
 ├── Dockerfile / docker-compose.yml / docker-build.sh   # 容器化部署（见「Docker 部署」）
-├── example-config.json / example-paypal.json  # 批量生成配置（普通 / PayPal 支付变体）
+├── example-paypal.json # PayPal 支付变体生成配置（普通变体是上面的 example-config.json）
+├── Makefile            # 任务入口：create / init / run / serve / dev / check / test / test-e2e / check-privacy / docker-* / clean
+├── .gitignore          # 忽略口径：.env / gen/（默认产物）/ gen-paypal/（e2e scratch 产物）
+├── TODO.md             # 路线图与已知边界
+├── SECURITY.md         # 漏洞报告政策
+├── LICENSE             # MIT
 └── .env.example        # .env 模板（LUME_CORE_BIN 路径；.env 本体进 .gitignore）
 ```
 
@@ -136,6 +141,8 @@ make           # -> bin/lume-core.exe
    ```
 
    Makefile 已用 `-include .env` + `$(or $(LUME_CORE_BIN),lume-core)` 解析：有 `.env` 优先用它的绝对路径，没有则回退到 PATH 上的 `lume-core`。
+
+  > 这里只读 `.env`——本仓库没有任何东西会加载 `.env.local`（那是 Vite 生态的约定文件名），把路径写进去不会生效。
 
 ## 用法
 
