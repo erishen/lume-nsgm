@@ -81,6 +81,7 @@ lume-nsgm/
 ├── Makefile            # 任务入口：create / init / run / serve / dev / check / test / test-e2e / check-privacy / docker-* / clean
 ├── .gitignore          # 忽略口径：.env / gen/（默认产物）/ gen-paypal/（e2e scratch 产物）
 ├── TODO.md             # 路线图与已知边界
+├── ARCHITECTURE.zh.md  # 架构深入文档（中文）：生成流水线 / 运行期路由 / 支付子系统
 ├── SECURITY.md         # 漏洞报告政策
 ├── LICENSE             # MIT
 └── .env.example        # .env 模板（LUME_CORE_BIN 路径；.env 本体进 .gitignore）

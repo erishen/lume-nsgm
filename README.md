@@ -83,6 +83,7 @@ lume-nsgm/
 ├── Makefile            # task entry: create / init / run / serve / dev / check / test / test-e2e / check-privacy / docker-* / clean
 ├── .gitignore          # ignore scope: .env / gen/ (default output) / gen-paypal/ (e2e scratch output)
 ├── TODO.md             # roadmap and known boundaries
+├── ARCHITECTURE.zh.md  # architecture deep-dive (Chinese): generation pipeline, runtime routing, payment subsystem
 ├── SECURITY.md         # vulnerability reporting policy
 ├── LICENSE             # MIT
 └── .env.example        # .env template (LUME_CORE_BIN path; the .env file itself is git-ignored)
