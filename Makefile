@@ -7,7 +7,7 @@ LUME := $(or $(LUME_CORE_BIN),lume-core)
 LUME_RUN := $(or $(LUME_BIN),$(LUME_CORE_BIN),lume-core)
 TARGET = main.lume
 
-.PHONY: run base dev create init check test serve web-install clean \
+.PHONY: run base dev create init check check-privacy test serve web-install clean \
         docker-build docker-up docker-down docker-logs docker-ps docker-clean \
         test-e2e
 
@@ -78,11 +78,17 @@ check:
 	$(LUME) --check tests/t6.lume
 	$(LUME) --check tests/t7.lume
 
+# 发布前隐私自检：扫描 git 跟踪文件里的本机路径 / 私有工作区名 / 凭据形态
+# （有意例外需在 scripts/check-privacy.py 的 ALLOW 里登记并写理由）。
+# make test 已内含本检查（前置闸）。
+check-privacy:
+	python3 scripts/check-privacy.py
+
 # 运行型测试：t3 为模板引擎冒烟；t1/t2/t4/t5 为断言型回归（sql_default、模块生成器
 # 数据层/路由层、React 前端生成器），t6 为 schema 校验回归，t7 为支付接线回归
 # （pay.lume 已知向量 + validate_pay + 字段级 default），各自 main() 返回失败计数即
-# 退出码，断言失败则 make test 非零退出。
-test:
+# 退出码，断言失败则 make test 非零退出。前置隐私自检（check-privacy）先跑。
+test: check-privacy
 	@fail=0; \
 	for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume tests/t5.lume tests/t6.lume tests/t7.lume; do \
 		echo "=== running $$f ==="; \

@@ -72,6 +72,7 @@ lume-nsgm/
     └── t7.lume          # 支付回归断言（签名向量 / validate_pay / 字段 default）
 ├── scripts/
 │   ├── mock_pay_gateway.py  # 模拟 PayPal 网关（OAuth2/建单/捕获/查单/查捕获/退款，独立实现与 lume 侧交叉验证）
+│   ├── check-privacy.py     # 发布前隐私自检（跟踪文件里的本机路径/私有工作区名/凭据形态）
 │   └── e2e.sh          # 端到端探针：起生成工程 + curl 跑 SSR/CRUD/搜索/分页/迁移/支付
 ├── Dockerfile / docker-compose.yml / docker-build.sh   # 容器化部署（见「Docker 部署」）
 ├── example-config.json / example-paypal.json  # 批量生成配置（普通 / PayPal 支付变体）
@@ -148,6 +149,9 @@ echo "name varchar required searchable" | make init MODULE=product
 
 # 语法检查（含模板引擎 t3）
 make check
+
+# 发布前隐私自检（跟踪文件里的本机路径/私有工作区名/凭据形态；make test 已内含）
+make check-privacy
 
 # 生成器断言套件（t1-t6）
 make test
