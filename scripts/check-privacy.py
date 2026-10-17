@@ -5,9 +5,10 @@
 判据是逐文件字节正则（等价 `grep -a -c`；`strings` 会把嵌在长串里的路径切断，漏报）。
 命中分两类：
   - 真泄漏：本机家目录路径（/Users/<user>/…）、私有工作区/仓库名、凭据形态
-    （sk-/ghp_/AKIA/PEM 私钥头）
-  - 已登记例外（ALLOW）：有意为之的文档占位符与公开仓库地址。新增例外必须
-    在这里登记并写理由，否则守卫下次照样红——登记即声明「这行我审过」。
+    （sk-/ghp_/AKIA/PEM 私钥头）、真实交易 ID 形态（17 位纯大写字母数字，
+    PayPal 订单号/捕获 ID 的形状——文档与文案只允许用虚构示例）
+  - 已登记例外（ALLOW）：有意为之的文档占位符、公开仓库地址与虚构示例 ID。
+    新增例外必须在这里登记并写理由，否则守卫下次照样红——登记即声明「这行我审过」。
 
 用法：make check-privacy（或 python3 scripts/check-privacy.py）
 退出码 0 = 干净；1 = 有命中（make test 已内含本检查）。
@@ -32,6 +33,7 @@ NEEDLES = [
     (re.compile(rb'\bghp_[A-Za-z0-9]{20,}'), 'GitHub PAT'),
     (re.compile(rb'\bAKIA[0-9A-Z]{16}'), 'AWS Access Key'),
     (re.compile(rb'PRIVATE KEY'), 'PEM 私钥头'),
+    (re.compile(rb'\b[0-9A-Z]{17}\b'), '真实交易 ID 形态（PayPal 订单号/捕获 ID 形状）'),
 ]
 
 # 行级例外（正则, 理由）。只放「审过的、有意为之的」。
@@ -40,6 +42,7 @@ ALLOW = [
     (re.compile(rb'E:/[Ww]orkspace/'), 'README 的 Windows 文档占位符'),
     (re.compile(rb'github(\.com|usercontent\.com)/erishen'), '公开仓库地址（lume-core 为公开 repo）'),
     (re.compile(rb'erishen/lume-core'), 'README 变量表里的公开仓库引用'),
+    (re.compile(rb'1AB23456CD7890123|2CD34567DE8901234'), 'base.lume 恢复页文案的虚构示例 ID（递増序列，一眼可辨非真实交易）'),
 ]
 
 
