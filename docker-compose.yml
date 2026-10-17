@@ -28,7 +28,9 @@ services:
     image: lume-nsgm-app:paypal
     container_name: lume-nsgm-paypal
     ports:
-      - "${DOCKER_PORT:-18082}:18081"
+      # 默认只绑 127.0.0.1（沙箱实例不暴露局域网）；如需局域网访问，
+      # 去掉 127.0.0.1: 前缀即可（同时留意 PayPal 返回地址仍是 127.0.0.1）
+      - "127.0.0.1:${DOCKER_PORT:-18082}:18081"
     environment:
       # 生成工程从 env 读取 server 配置；容器内固定 18081 / 0.0.0.0 / 单 worker
       - PORT=18081

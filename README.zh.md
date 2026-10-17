@@ -276,6 +276,7 @@ docker run --rm -p 18082:18081 -v nsgm-paypal-data:/data lume-nsgm-app:paypal
 - 首页 / SSR 页面： `http://localhost:18082/`
 - React SPA（主 UI）： `http://localhost:18082/spa/`（hash 路由，API 走同源 `/api`）
 - REST API： `http://localhost:18082/api/<module>`
+- **绑定地址**：compose 默认只发布到 `127.0.0.1`（沙箱实例不暴露局域网）；需要局域网访问时，去掉 `docker-compose.yml` 端口行的 `127.0.0.1:` 前缀即可
 
 容器内配置（compose 的 `environment` 段，生成工程从 env 读取，容器端口固定 18081）：
 

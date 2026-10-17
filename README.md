@@ -270,6 +270,7 @@ Access (host port defaults to 18082; override it with `DOCKER_PORT`):
 - Home / SSR pages: `http://localhost:18082/`
 - React SPA (the main UI): `http://localhost:18082/spa/` (hash router, same-origin `/api`)
 - REST API: `http://localhost:18082/api/<module>`
+- **Bind address**: compose publishes to `127.0.0.1` only by default (a sandbox instance should not be exposed to the LAN); to allow LAN access, drop the `127.0.0.1:` prefix on the ports line in `docker-compose.yml`
 
 In-container configuration (the compose `environment` section; the generated project reads these from env, container port fixed at 18081):
 
