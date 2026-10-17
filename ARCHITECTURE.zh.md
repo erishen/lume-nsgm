@@ -218,6 +218,8 @@ pending ──捕获成功──► paid ──退款成功──► refunded
 |---|---|
 | **收银台复用**：`/shop/pay/:ono` 有 `paypal_order_id` 就重建 approve 链接，不重新建单 | 否则用户刷新一次收银台就产生一个孤儿 PayPal 订单 |
 | **INSERT-first + 补偿扣库存**：先插单（带商品快照），再 `UPDATE ... stock = stock - 1 WHERE id=? AND stock>=1`，0 行则删单 + 售罄页 | 并发下不会超卖；失败有明确页面而非 500 |
+| **库存守卫用原子条件 UPDATE 而非锁**：不用 `lock_file` / 行锁 / 显式事务 | 锁会串行化所有下单；单条 `stock>=1` UPDATE 在 SQLite 写串行化下即原子（CAS 语义），0 行 = 售罄或被抢，补偿删单收尾 |
+| **SQLite 连接带 busy timeout**（core `178501c`：两个 open 点各 `sqlite3_busy_timeout(sq, 5000)`，`LUME_SQLITE_BUSY_TIMEOUT_MS` 可调） | 每次调用开关连接 + sqlite3 默认 timeout 0 ⇒ 并发写立即 `database is locked`（实测 8 进程丢 7、480 次写只落地 77）；改为有界等待后 0 失败零丢更新。单语句原子性不变，只改失败语义 |
 | **订单号/交易号互认**：退款与恢复页接受订单号或捕获 ID（交易号），订单端点 404 自动改查捕获端点 | 真实事故：用户把 PayPal 后台「交易号」填进「订单号」框，`orders/{捕获ID}` 必回 404 `RESOURCE_NOT_FOUND` |
 | **重复退款幂等**：422 的 `CAPTURE_FULLY_REFUNDED` / `ALREADY_REFUNDED` / `REFUND_ALREADY_EXISTS` / `DUPLICATE` 一律按成功对账 | 都说明上次已退成功，按失败报会给用户假失败（真实沙箱实证：已全额退再退是 `CAPTURE_FULLY_REFUNDED`，文档写的 `ALREADY_REFUNDED` 反而不出现） |
 | **出站重试只重传传输失败**：`http_post` 的 `ok=false` 仅表示 connect/TLS/超时；4xx/5xx 仍 `ok=true` | 按 ok 重试不会重放已被服务端拒绝的请求；core 无 sleep 内建，立即重试（单次超时本身即等待） |
@@ -226,7 +228,9 @@ pending ──捕获成功──► paid ──退款成功──► refunded
 **已知边界**（与 TODO S7 对齐）：
 - webhook 验签是纯 HMAC 简化版——真实 PayPal 签名含 `crc32(body)`，lume-core 暂无 crc32 内建，验签材料随 JSON body 传递（沙箱约定）；
 - 无随机源 ⇒ 业务单号由生成器侧派生（`order_no` + `now()`），沙箱够用；
-- 金额/币种配置驱动（`currency` / `currency_symbol` / `brand`）。
+- 金额/币种配置驱动（`currency` / `currency_symbol` / `brand`）；
+- 跨语句无事务（`sql_write` 拒 `BEGIN/COMMIT` 且每次调用新连接，TODO S2）：下单两步最终一致，进程崩在中间会留 pending 孤儿单——不占库存、不会超卖，待手工清理或后续事务支持；
+- SQLite 单文件写吞吐有上限：瞬时并发冲突已由 busy timeout 兜底（上表），量上来仍应 WAL + 单写者队列（TODO S6），勿过早引外置库。
 
 ### 4.4 mock 网关与交叉验证
 

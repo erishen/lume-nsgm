@@ -122,15 +122,17 @@
 - **S1 Session 进程内内存**：`req.session` 是 VM 内存表（`bridge_serve.c`），
   `workers > 1` 时各 worker 一份 → 购物车串味；重启即丢。⇒ Docker 必须
   `WORKERS=1`；购物车落库（P2-4）
-- **S2 无事务**：`BEGIN/COMMIT` 被 `sql_validate_write` 拒（`builtins_sql.c`）。
-  订单+库存非原子 ⇒ lock_file + 补偿 DELETE 缓解（P1-2），接受最终一致
+- **S2 无事务**：`BEGIN/COMMIT` 被 `sql_validate_write` 拒（`builtins_sql.c`），
+  且每次调用开关连接 ⇒ 事务状态无法跨语句保持。订单+库存非原子 ⇒ 守卫 UPDATE +
+  补偿 DELETE 缓解（P1-2），接受最终一致（崩在中间留 pending 孤儿单：不占库存、
+  不超卖，待手工清或后续事务支持）。并发写冲突已由 busy timeout 兜底（P3-15）
 - **S3 响应无状态码/头/302**：handler 只能 string→200 HTML / null→204 / map→200 JSON
   （`bridge_serve.c:826-836`）⇒ 跳转变通用自动提交表单（P3-5）
 - **S4 无 multipart**：商品图走外链或后台上传，不做容器内上传
 - **S5 出站 HTTP 默认拒私有地址**：`http_*` 需显式 `allow_private: true`
   （`builtins_http.c`）——本地 sidecar/mock 网关注意
-- **S6 SQLite 单文件写并发**：电商规模内没问题；量上来先加 WAL + 单写者队列，
-  勿过早引外置库
+- **S6 SQLite 单文件写并发**：电商规模内没问题；瞬时冲突已由 busy timeout 兜底
+  （P3-15），量上来先加 WAL + 单写者队列，勿过早引外置库
 - **S7 回调无请求头**：`req` 对象不带 headers（只有 method/path/query/body/…）⇒
   webhook 验签三要素（transmission id / time / signature）由网关放进 body 的
   `verify_ts` / `verify_nonce` / `verify_sign` 字段（mock PayPal webhook 同款约定）。
@@ -265,3 +267,25 @@ P1 与 P2 可并行；P3 的 P3-1/2/3（core 内建）不依赖 P1/P2，可随�
   - 宿主树 `work/lume/lume` 的 `lume.h`/`interp.c`/`bridge_stub.c` 在 HOST_PINNED
     清单，不会自动同步，需要时手工合并；`bridge_native.c` 未 pin，会随 sync 流入。
 - **遗留**：P3-13 的 `/shop?act=` 查参方案保持不变（31 条稳，无需改回独立路由）。
+
+### P3-15 SQLite busy timeout：并发写从「立即失败」到「排队等待」（✅ 2026-10-17，core `178501c`，local-only）
+- **发现**（用户提问「有处理重复幂等支付和库存锁吗」的深挖）：lume-core 的
+  `sql_query`/`sql_write` 每次调用开关连接，而 sqlite3 默认 busy timeout 为 0——
+  prefork 多 worker（或任何第二进程）并发写同一库文件时，写锁被占的请求**立即**
+  `database is locked` 失败，而非等待。实测 8 进程 × 60 次守卫 UPDATE：
+  **7 个进程失败、480 次写只落地 77 次**。
+- **修复**（`src/builtins_sql.c`，两个 open 点——只读与读写路径各一）：
+  `sqlite3_busy_timeout(sq, 5000)`；默认 5s，env `LUME_SQLITE_BUSY_TIMEOUT_MS`
+  可覆盖（钳制 [0, 60000]；`0` = 恢复原生 fail-fast；非法值回落默认）。
+  文件头注释同步说明「每次调用新连接 ⇒ 必须 armed timeout」的动因。
+- **实证**：同负载新默认下 8 进程 **0 失败、末值 480（零丢更新）**；`env=0`
+  复现旧行为（7 失败/77）；`env=abc` 回落默认（0 失败/480）。
+- **回归**：`make sql-test` / `builtins-test` / `backend-parity` / smoke 及
+  其余全部 test 目标绿（native-consistency llvm 腿仍是既有闭包捕获缺口，
+  干净 HEAD 可复现，与本次无关——interp/text 双腿均匹配 expected）。
+- **边界不变**：单语句护栏不动（`BEGIN/COMMIT` 仍拒、仍禁多语句、仍参数化），
+  原子性由单语句本身保证，timeout 只改失败语义不改隔离性；跨语句事务仍是 S2。
+  文档：core CHANGELOG「Fixed」节 + 本仓 README 双语「并发与库存」条 +
+  ARCHITECTURE §4.3 两行决策 + S2/S6 更新。
+- **安装**：`~/.local/bin/lume-core` 已更新（rm 后 cp）；Docker 镜像下次
+  `docker compose up -d --build` 时从源码编入，数据卷不受影响。

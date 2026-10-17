@@ -226,6 +226,7 @@ pnpm dev            # http://localhost:5173，/api 由 Vite 代理到 lume :8081
 - **React 前端（主 UI）**： `pnpm dev` 起在 :5173，每模块生成 `<Ctrl>Page.tsx`（搜索/分页/受控表单/删除 confirm/时间列 `fmtTime` 本地化），hash 路由导航；`pnpm build && pnpm preview` 即生产预览（同样带 /api 代理，免 CORS）
 - SSR 回退页面： http://localhost:8081/ → 各模块列表页（搜索/新增/编辑/删除均为 SSR 表单，无需 JS）
 - JSON API： `GET /api/{module}?page=0&pageSize=20&q=关键字`、`GET /api/{module}/:id`、`POST /api/{module}`（JSON body 新增）、`POST /api/{module}/update/:id`、`POST /api/{module}/delete/:id`（React 前端消费的正是这套 API）
+- **并发与库存**：下单扣库存是单条 `stock >= 1` 守卫 UPDATE（单语句原子，不会超卖）；lume-core 的 SQLite 连接带 5s busy timeout（`LUME_SQLITE_BUSY_TIMEOUT_MS` 环境变量可调），多 worker 并发写会排队而非直接报 `database is locked`；跨语句事务暂不支持（下单两步最终一致，极端情况下留 pending 孤儿单，详见 TODO「已知边界」S2）
 - 在 lume-nsgm 根目录可 `make serve`（读 `.env` 的 `LUME_BIN`，默认 `lume-core`）
 
 > 说明：SSR 表单设计为 GET 提交（`req.query_params` 已 URL 解码，可直接读）；
