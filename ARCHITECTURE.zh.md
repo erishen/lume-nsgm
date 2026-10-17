@@ -226,7 +226,6 @@ pending ──捕获成功──► paid ──退款成功──► refunded
 **已知边界**（与 TODO S7 对齐）：
 - webhook 验签是纯 HMAC 简化版——真实 PayPal 签名含 `crc32(body)`，lume-core 暂无 crc32 内建，验签材料随 JSON body 传递（沙箱约定）；
 - 无随机源 ⇒ 业务单号由生成器侧派生（`order_no` + `now()`），沙箱够用；
-- 微信支付 v3 为 HMAC-SHA256 适配（真 RSA 是已知边界）；
 - 金额/币种配置驱动（`currency` / `currency_symbol` / `brand`）。
 
 ### 4.4 mock 网关与交叉验证

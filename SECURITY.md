@@ -20,8 +20,7 @@ lume-nsgm 是一个**本地代码生成器**：它脚手架出一个自包含的
 ## 密钥处理约定
 
 - 支付凭据一律**运行时经环境变量注入**（PayPal：`PAYPAL_CLIENT_ID` /
-  `PAYPAL_KEY`；微信：`PAY_APPID` / `PAY_MCHID` / `PAY_KEY` / `PAY_SERIAL` /
-  `PAY_NOTIFY_URL`），不烤进生成工程或本仓库。
+  `PAYPAL_KEY`），不烤进生成工程或本仓库。
 - `.env` 已被 `.gitignore` 忽略；`.env.example` 只含占位符。
 - `make check-privacy` 对仓库做路径/凭据形态扫描，并作为 `make test` 的前置闸。
 
