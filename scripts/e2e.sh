@@ -378,6 +378,35 @@ PY
   [ "$DUP_CODE" = "422" ] || fail "mock 对已退捕获重复退应回 422（got $DUP_CODE）"
   echo "ok   退款（PayPal）：确认页 -> capture refund -> refunded 落库 -> 重复退幂等 -> NULL 列兜底 -> 查单 -> mock 422 对账"
 
+  # ---- 对账保护：paid/refunded 订单禁止后台改单/删单（SSR + JSON 双面守卫）----
+  # 店面订单的金额/订单号已被 PayPal 侧引用（退款按行金额、关联 ID 回填），
+  # 后台篡改会破坏对账 —— row_locked 守卫四处拒绝；pending 单照常可编辑。
+  echo "==> 对账保护阶段：paid/refunded 拒后台改删，pending 可编辑 ..."
+  PP_OID="$(curl -s --noproxy '*' "$PPB/api/order?q=$PP_SONO" | grep -o '"id":[0-9]*' | head -1 | sed 's/[^0-9]//g')"
+  [ -n "$PP_OID" ] || fail "对账保护：未定位到店面订单行 id"
+  UPD_LOCK="$(curl -s --noproxy '*' -X POST "$PPB/api/order/update/$PP_OID" -H 'Content-Type: application/json' -d '{"order_no":"HACK","amount_cents":1}')"
+  echo "$UPD_LOCK" | grep -q '"err":"order_locked"' || fail "paid 订单应拒绝后台编辑: $UPD_LOCK"
+  DEL_LOCK="$(curl -s --noproxy '*' -X POST "$PPB/api/order/delete/$PP_OID" -H 'Content-Type: application/json' -d '{}')"
+  echo "$DEL_LOCK" | grep -q '"err":"order_locked"' || fail "paid 订单应拒绝后台删除: $DEL_LOCK"
+  # SSR 路径同样拒（flash 提示、不落库）
+  SSR_SAVE="$(curl -s --noproxy '*' "$PPB/order/save?id=$PP_OID&order_no=HACK&amount_cents=1")"
+  echo "$SSR_SAVE" | grep -q '受对账保护' || fail "paid 订单 SSR 编辑应被守卫拒绝: $SSR_SAVE"
+  curl -s --noproxy '*' -o /dev/null "$PPB/order/del/$PP_OID"
+  curl -s --noproxy '*' "$PPB/api/order?q=$PP_SONO" | grep -q '"status":"paid"' \
+    || fail "对账守卫：paid 订单不应被删除/篡改"
+  # refunded（$ONO）：编辑亦拒
+  ONO_ID="$(curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -o '"id":[0-9]*' | head -1 | sed 's/[^0-9]//g')"
+  [ -n "$ONO_ID" ] || fail "对账保护：未定位到已退款订单行 id"
+  curl -s --noproxy '*' -X POST "$PPB/api/order/update/$ONO_ID" -H 'Content-Type: application/json' -d '{"order_no":"HACK"}' \
+    | grep -q '"err":"order_locked"' || fail "refunded 订单应拒绝后台编辑"
+  # pending（幂等段重买单 REBUY）：仍可编辑（手工调整合法）
+  REBUY_ID="$(curl -s --noproxy '*' "$PPB/api/order?q=$REBUY" | grep -o '"id":[0-9]*' | head -1 | sed 's/[^0-9]//g')"
+  [ -n "$REBUY_ID" ] || fail "对账保护：未定位到重买 pending 单 id"
+  curl -s --noproxy '*' -X POST "$PPB/api/order/update/$REBUY_ID" -H 'Content-Type: application/json' \
+    -d "{\"order_no\":\"$REBUY\",\"amount_cents\":14900}" | grep -q '"ok":true' \
+    || fail "pending 订单仍应可后台编辑（守卫只锁 paid/refunded）"
+  echo "ok   对账保护：paid/refunded 编辑+删除+SSR 守卫全拒、pending 编辑放行"
+
   # ---- 早期订单（paypal_order_id 与 capture_id 均为 SQL NULL）退款恢复阶段 ----
   # 真实 bug：迁移补列前的早期订单两列全 NULL，退款路由旧逻辑只兜底「capture_id 空但
   # paypal_order_id 在」，两者皆空时直接死在报错。修复后：确认页提示去恢复，

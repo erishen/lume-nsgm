@@ -59,6 +59,16 @@ func get_row(id: int) {
   if (len(rows) == 0) { return null; }
   return rows[0];
 }
+{{#if refund_on}}
+// 对账保护：paid/refunded 的店面订单已被支付网关引用（退款按行金额、关联 ID
+// 已回填），后台改单/删单会破坏对账 —— 一律拒绝；pending 单照常可编辑
+func row_locked(r): int {
+  if (r == null) { return 0; }
+  let st = str(get(r, "{{refund_st_f}}", ""));
+  if (st == "paid" || st == "refunded") { return 1; }
+  return 0;
+}
+{{/if}}
 
 // 从表单/JSON 数据按序收集 form 字段值（写入 out_vals）；
 // 返回 "" 表示齐全，否则为缺失的必填字段 label
@@ -177,12 +187,24 @@ func list_body(qp) {
       j = j + 1;
     }
     let rid = str(get(r, "id", 0));
-    body = body + "<td class=\"op\"><a href=\"/{{ctrl}}/edit/" + rid + "\">编辑</a> "
-      + "<a class=\"del\" href=\"/{{ctrl}}/del/" + rid + "\">删除</a>"
+    body = body + "<td class=\"op\">";
+    // 对账锁定（refund 模块）：paid 行只留退款入口、refunded 行无后台操作，
+    // 与 save/del handler 的状态守卫一致；普通模块恒出编辑/删除
+    let lck = 0;
 {{#if refund_on}}
-      + (str(get(r, "{{refund_st_f}}", "")) == "paid" ? " <a class=\"refund\" href=\"/shop/refund/" + ui.esc(str(get(r, "{{refund_no_f}}", ""))) + "\">退款</a>" : "")
+    if (str(get(r, "{{refund_st_f}}", "")) == "paid") { lck = 1; }
+    if (str(get(r, "{{refund_st_f}}", "")) == "refunded") { lck = 1; }
 {{/if}}
-      + "</td></tr>\n";
+    if (lck == 0) {
+      body = body + "<a href=\"/{{ctrl}}/edit/" + rid + "\">编辑</a> "
+        + "<a class=\"del\" href=\"/{{ctrl}}/del/" + rid + "\">删除</a>";
+    }
+{{#if refund_on}}
+    if (str(get(r, "{{refund_st_f}}", "")) == "paid") {
+      body = body + "<a class=\"refund\" href=\"/shop/refund/" + ui.esc(str(get(r, "{{refund_no_f}}", ""))) + "\">退款</a>";
+    }
+{{/if}}
+    body = body + "</td></tr>\n";
     i = i + 1;
   }
   body = body + "</tbody></table></div>\n";
@@ -266,6 +288,11 @@ get "/{{ctrl}}/edit/:id", func(req) {
 get "/{{ctrl}}/save", func(req) {
   let qp = db.qparams(req);
   let id = db.qs_int(qp, "id", 0);
+{{#if refund_on}}
+  if (id > 0 && row_locked(get_row(id)) == 1) {
+    return flash_page("已支付/已退款订单受对账保护，禁止编辑", "err", "/{{ctrl}}");
+  }
+{{/if}}
   let vals = [];
   let missing = collect(qp, vals);
   if (missing != "") {
@@ -283,6 +310,11 @@ get "/{{ctrl}}/save", func(req) {
 
 get "/{{ctrl}}/del/:id", func(req) {
   let id = db.qs_int(req.params, "id", 0);
+{{#if refund_on}}
+  if (id > 0 && row_locked(get_row(id)) == 1) {
+    return flash_page("已支付/已退款订单受对账保护，禁止删除", "err", "/{{ctrl}}");
+  }
+{{/if}}
   if (id > 0) {
     sql_write(db.dsn(), "DELETE FROM \"" + TBL + "\" WHERE id = ?", [id]);
   }
@@ -300,35 +332,45 @@ get "/api/{{ctrl}}", func(req) {
 get "/api/{{ctrl}}/:id", func(req) {
   let id = db.qs_int(req.params, "id", 0);
   let r = get_row(id);
-  if (r == null) { return { "status": 404, "body": { "err": "not found" } }; }
+  if (r == null) { return { "err": "not found" }; }
   return r;
 };
 
 post "/api/{{ctrl}}", func(req) {
-  if (req.body == null) { return { "status": 400, "body": { "err": "empty body" } }; }
+  if (req.body == null) { return { "err": "empty body" }; }
   let data = json(req.body);
-  if (data == null) { return { "status": 400, "body": { "err": "invalid json body" } }; }
+  if (data == null) { return { "err": "invalid json body" }; }
   let vals = [];
-  if (collect(data, vals) != "") { return { "status": 400, "body": { "err": "missing required field" } }; }
+  if (collect(data, vals) != "") { return { "err": "missing required field" }; }
   sql_write(db.dsn(), INSERT_SQL, vals);
-  return { "status": 200, "body": { "ok": true } };
+  return { "ok": true };
 };
 
 post "/api/{{ctrl}}/update/:id", func(req) {
-  if (req.body == null) { return { "status": 400, "body": { "err": "empty body" } }; }
+  if (req.body == null) { return { "err": "empty body" }; }
   let id = db.qs_int(req.params, "id", 0);
   let data = json(req.body);
-  if (data == null) { return { "status": 400, "body": { "err": "invalid json body" } }; }
+  if (data == null) { return { "err": "invalid json body" }; }
+{{#if refund_on}}
+  if (row_locked(get_row(id)) == 1) {
+    return { "ok": false, "err": "order_locked", "msg": "已支付/已退款订单受对账保护，禁止编辑" };
+  }
+{{/if}}
   let vals = [];
-  if (collect(data, vals) != "") { return { "status": 400, "body": { "err": "missing required field" } }; }
+  if (collect(data, vals) != "") { return { "err": "missing required field" }; }
   let args = db.push_all([], vals);
   push(args, id);
   sql_write(db.dsn(), UPDATE_SQL, args);
-  return { "status": 200, "body": { "ok": true } };
+  return { "ok": true };
 };
 
 post "/api/{{ctrl}}/delete/:id", func(req) {
   let id = db.qs_int(req.params, "id", 0);
+{{#if refund_on}}
+  if (row_locked(get_row(id)) == 1) {
+    return { "ok": false, "err": "order_locked", "msg": "已支付/已退款订单受对账保护，禁止删除" };
+  }
+{{/if}}
   sql_write(db.dsn(), "DELETE FROM \"" + TBL + "\" WHERE id = ?", [id]);
-  return { "status": 200, "body": { "ok": true } };
+  return { "ok": true };
 };

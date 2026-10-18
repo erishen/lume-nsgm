@@ -224,6 +224,7 @@ pending ──捕获成功──► paid ──退款成功──► refunded
 | **SQLite 连接带 busy timeout**（core `178501c`：两个 open 点各 `sqlite3_busy_timeout(sq, 5000)`，`LUME_SQLITE_BUSY_TIMEOUT_MS` 可调） | 每次调用开关连接 + sqlite3 默认 timeout 0 ⇒ 并发写立即 `database is locked`（实测 8 进程丢 7、480 次写只落地 77）；改为有界等待后 0 失败零丢更新。单语句原子性不变，只改失败语义 |
 | **订单号/交易号互认**：退款与恢复页接受订单号或捕获 ID（交易号），订单端点 404 自动改查捕获端点 | 真实事故：用户把 PayPal 后台「交易号」填进「订单号」框，`orders/{捕获ID}` 必回 404 `RESOURCE_NOT_FOUND` |
 | **重复退款幂等**：422 的 `CAPTURE_FULLY_REFUNDED` / `ALREADY_REFUNDED` / `REFUND_ALREADY_EXISTS` / `DUPLICATE` 一律按成功对账 | 都说明上次已退成功，按失败报会给用户假失败（真实沙箱实证：已全额退再退是 `CAPTURE_FULLY_REFUNDED`，文档写的 `ALREADY_REFUNDED` 反而不出现） |
+| **订单对账保护（row_locked）**：店面订单 `paid`/`refunded` 后，后台编辑/删除在 SSR（`/order/save\|del`）与 JSON（`/api/order/update\|delete`）双面被拒；模块生成器在 refund 模块里生成守卫与操作列锁定（paid 只留退款入口），pending 照常可编辑 | 金额/订单号已被网关侧引用（退款按行金额、关联 ID 回填），后台篡改直接破坏对账；置 `showInForm=0` 会连合法的 pending 手工建单一起废掉，状态守卫精准覆盖风险 |
 | **出站重试只重传传输失败**：`http_post` 的 `ok=false` 仅表示 connect/TLS/超时；4xx/5xx 仍 `ok=true` | 按 ok 重试不会重放已被服务端拒绝的请求；core 无 sleep 内建，立即重试（单次超时本身即等待） |
 | **密钥 env 注入**：`client_secret` 走 `PAYPAL_KEY` 等环境变量，从不进镜像层、不进生成物 | 镜像 `docker history` 干净；env 名不能含 `SECRET` 子串（lume `env()` 掩码会读出 null，见 README） |
 

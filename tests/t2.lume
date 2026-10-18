@@ -54,6 +54,17 @@ fails = fails + a.assert_not_contains(mod, "shop/refund", "t2: plain module has 
 fails = fails + a.assert_contains(omod, "/shop/refund/\" + ui.esc(str(get(r, \"order_no\", \"\")))", "t2: order module list injects refund link");
 fails = fails + a.assert_contains(omod, "str(get(r, \"status\", \"\")) == \"paid\"", "t2: refund link gated on paid status");
 
+// 对账保护：订单模块生成 row_locked 守卫（SSR save/del + JSON update/delete 四处拒绝），
+// 普通模块无守卫；paid/refunded 行操作列锁定（paid 只留退款入口、refunded 无操作）
+fails = fails + a.assert_contains(omod, "func row_locked(r): int", "t2: order module emits row_locked guard");
+fails = fails + a.assert_contains(omod, "order_locked", "t2: JSON API guard returns order_locked err");
+fails = fails + a.assert_contains(omod, "受对账保护，禁止编辑", "t2: guard message for update present");
+fails = fails + a.assert_contains(omod, "受对账保护，禁止删除", "t2: guard message for delete present");
+fails = fails + a.assert_not_contains(mod, "row_locked", "t2: plain module has no reconciliation guard");
+
+// JSON API 裸 map 约定：handler 返回整体序列化、HTTP 恒 200，不得再有 {status,body} 包装
+fails = fails + a.assert_not_contains(mod, "\"body\":", "t2: JSON API returns bare maps (no {status,body} wrapper)");
+
 // 展示格式化：FIELDS 数据行按字段名自动打 fmt 标（money=_cents 结尾 / st=status）；
 // 运行期分支代码在所有模块模板里都存在（文本层面），故断言必须落在 FIELDS 数据上
 fails = fails + a.assert_contains(omod, "\"name\": \"amount_cents\", \"label\": \"金额（分）\", \"form\": 0, \"search\": 0, \"required\": 0, \"list\": 1, \"type\": \"integer\", \"fmt\": \"money\" }", "t2: *_cents field tagged fmt=money");

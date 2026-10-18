@@ -121,10 +121,13 @@ export default function {{Ctrl}}Page() {
       data[f.name] = String(editing[f.name] ?? "");
     }
     try {
-      if (editing.id) {
-        await apiUpdate(CTRL, Number(editing.id), data);
-      } else {
-        await apiAdd(CTRL, data);
+      const res: Row = editing.id
+        ? await apiUpdate(CTRL, Number(editing.id), data)
+        : await apiAdd(CTRL, data);
+      // 服务端守卫拒绝（如订单对账保护）返回 { ok:false, err, msg }（HTTP 恒 200）
+      if (res.ok === false) {
+        setErr(String(res.msg ?? res.err ?? "保存失败"));
+        return;
       }
       flash("已保存");
       setEditing(null);
@@ -139,9 +142,17 @@ export default function {{Ctrl}}Page() {
     if (!window.confirm("确认删除该记录？此操作不可恢复。")) {
       return;
     }
-    await apiDelete(CTRL, id);
-    flash("已删除");
-    load(page, q);
+    try {
+      const res = await apiDelete(CTRL, id);
+      if (res.ok === false) {
+        setErr(String(res.msg ?? res.err ?? "删除失败"));
+        return;
+      }
+      flash("已删除");
+      load(page, q);
+    } catch (e2) {
+      setErr(String(e2));
+    }
   }
 
   function gotoPage(p: number, e: MouseEvent) {
@@ -275,18 +286,29 @@ export default function {{Ctrl}}Page() {
                   ))}
                   <td className="op">
 {{#if refund_ono}}
-                    {String(row["{{refund_status}}"]) === "paid" ? (
+                    {/* 对账锁定：paid 只留退款入口、refunded 无后台操作（与服务端 row_locked 守卫一致） */}
+                    {String(row["{{refund_status}}"] ?? "") === "paid" ? (
                       <a className="refund" href={"#/shop/refund/" + encodeURIComponent(String(row["{{refund_ono}}"] ?? ""))}>
                         退款
                       </a>
-                    ) : null}
-{{/if}}
+                    ) : String(row["{{refund_status}}"] ?? "") === "refunded" ? null : (
+                      <>
+                        <a href={"#/" + CTRL} onClick={(e) => openEdit(row, e)}>
+                          编辑
+                        </a>
+                        <a className="del" href={"#/" + CTRL} onClick={(e) => removeRow(Number(row.id), e)}>
+                          删除
+                        </a>
+                      </>
+                    )}
+{{else}}
                     <a href={"#/" + CTRL} onClick={(e) => openEdit(row, e)}>
                       编辑
                     </a>
                     <a className="del" href={"#/" + CTRL} onClick={(e) => removeRow(Number(row.id), e)}>
                       删除
                     </a>
+{{/if}}
                   </td>
                 </tr>
               ))

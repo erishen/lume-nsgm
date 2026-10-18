@@ -43,8 +43,13 @@ fails = fails + a.assert_not_contains(page, "useState<any>", "t5: no untyped any
 // 店面订单模块页：操作列 paid 行退款链接；普通模块页不注入
 fails = fails + a.assert_contains(order_page, "shop/refund/\" + encodeURIComponent(String(row[\"order_no\"]", "t5: order page refund link targets #/shop/refund/:ono");
 fails = fails + a.assert_contains(order_page, "=== \"paid\"", "t5: refund link gated on paid rows");
+fails = fails + a.assert_contains(order_page, "=== \"refunded\" ? null : (", "t5: refunded rows locked out of edit/delete");
 fails = fails + a.assert_not_contains(order_page, "{{", "t5: no unrendered mustache in order page");
 fails = fails + a.assert_not_contains(page, "shop/refund", "t5: non-order page has no refund link");
+fails = fails + a.assert_not_contains(page, "row[\"status\"]", "t5: non-order page has no refund-status gating");
+
+// 服务端守卫拒绝（{ok:false,err,msg}）要在 UI 面呈现，不能假报「已保存」
+fails = fails + a.assert_contains(page, "res.ok === false", "t5: save/delete surface ok:false guard rejections");
 
 // 金额/状态列渲染（与 SSR 对齐）：订单页 *_cents 列出等宽金额、status 列出徽标
 fails = fails + a.assert_contains(order_page, "const CSYM = \"$\"", "t5: order page currency symbol injected");

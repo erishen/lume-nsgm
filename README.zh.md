@@ -390,13 +390,19 @@ pay.paypal_verify_webhook(secret, id, ts, body, sign_hex)    // HMAC(id\n+ts\n+b
   `RESOURCE_NOT_FOUND`/`INVALID_RESOURCE_ID`（2026-10-17 真实沙箱实证）——
   退款路由订单反查 404 后自动改查 `GET /v2/payments/captures/{id}`，用
   `supplementary_data.related_ids.order_id` 反解真实订单号，两列都回填正确值
+- **订单对账保护**：店面订单一旦 `paid`/`refunded`，后台改单/删单被 `row_locked`
+  守卫拒绝（SSR `/order/save|del` 返回 flash 错误页、JSON `/api/order/update|delete`
+  返回 `{ok:false,err:"order_locked"}`），订单列表操作列同步锁定（paid 行只留
+  「退款」入口、refunded 行无操作）——金额/订单号已被网关侧引用（退款按行金额），
+  后台篡改会破坏对账；`pending` 单照常可编辑（手工调整合法）
 
 回归：`make test` 含 t7（PayPal 已知向量 / validate_pay / 字段 default）；
 `make test-e2e` 固化 PayPal 沙箱全链路——建单 → approve_url → return 捕获 →
 `status:"paid"` → 重复 return 幂等 → webhook 验签 → 收银台复用防孤儿单 →
 退款与库存回补 → **早期订单双空关联 ID 恢复**（`need_recover` 提示 → `/shop/recover/:ono`
 表单 `capid` 直达 / `ppid` 反查 / `manual` 本地标记 / **交易号（捕获 ID）填进订单号框
-自动改查捕获接口**四条路径均落库 `refunded`）→ **商品目录示例播种与清空重载**
+自动改查捕获接口**四条路径均落库 `refunded`）→ **订单对账保护**（`row_locked`：
+paid/refunded 的后台编辑/删除在 SSR+JSON 双面被拒、pending 放行）→ **商品目录示例播种与清空重载**
 （空表自动播种 → `?act=clear` 清空且订单不受影响 → 不自动复活 → `?act=seed` 手动重载 →
 非空守卫）。
 
