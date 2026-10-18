@@ -7,7 +7,7 @@ LUME := $(or $(LUME_CORE_BIN),lume-core)
 LUME_RUN := $(or $(LUME_BIN),$(LUME_CORE_BIN),lume-core)
 TARGET = main.lume
 
-.PHONY: run base dev create init check check-privacy test serve web-install clean \
+.PHONY: run run-paypal base dev create init check check-privacy test serve web-install clean \
         docker-build docker-up docker-down docker-logs docker-ps docker-clean \
         test-e2e
 
@@ -23,6 +23,14 @@ STALE := $(if $(GEN_STAMP),$(shell find main.lume example-config.json lib scaffo
 
 run:
 	$(LUME) $(TARGET) example-config.json
+	@$(MAKE) --no-print-directory web-install
+
+# 电商支付变体：product/order 两模块 + shop 店面 + PayPal 支付闭环（配置即
+# example-paypal.json，敏感项 secret_env 指向 PAYPAL_KEY 走 env 注入）。
+# 注意与 run 共用 ./gen 输出目录——后跑者覆盖；生成后用 make serve 起服务，
+# 或 cd gen && lume-core app.lume（支付 env 见 README「支付」节）。
+run-paypal:
+	$(LUME) $(TARGET) example-paypal.json
 	@$(MAKE) --no-print-directory web-install
 
 # run 的别名：产物为以 lume 为底的可运行工程（app.lume + modules + SQLite）

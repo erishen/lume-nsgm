@@ -151,8 +151,13 @@ make           # -> bin/lume-core.exe
 # 批量：读 example-config.json 生成 user + order 两个模块
 make run
 
+# 电商支付变体：product/order 两模块 + shop 店面 + PayPal 支付闭环
+# （配置即 example-paypal.json，与 run 共用 ./gen 输出目录，后跑者覆盖；
+#  详见「支付」「店面」两节）
+make run-paypal
+
 # 单模块：命令行模板字段
-make dev
+make create MODULE=product
 
 # 交互式字段录入后生成（stdin 逐行输入 name type [required] [searchable]，空行结束）
 echo "name varchar required searchable" | make init MODULE=product

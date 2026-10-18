@@ -153,8 +153,13 @@ Pick one of two ways:
 # Batch: read example-config.json and generate the user + order modules
 make run
 
+# E-commerce payment variant: product/order modules + shop storefront + PayPal loop
+# (the config is example-paypal.json; shares the ./gen output directory with run —
+#  the later run wins; see the Payment and Storefront sections)
+make run-paypal
+
 # Single module: template fields from the command line
-make dev
+make create MODULE=product
 
 # Interactive field entry, then generate (stdin, one field per line: name type [required] [searchable], blank line ends)
 echo "name varchar required searchable" | make init MODULE=product
