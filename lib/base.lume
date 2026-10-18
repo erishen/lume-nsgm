@@ -84,7 +84,8 @@ export func gen_ui(out: string, mods, shop): int {
 
 // PayPal 支付接线块：OAuth2 建单 + 跳转 + 返回捕获。
 // client_id 来自配置（公开标识），client_secret 走 env（secret_env），
-// gw 可被 PAY_GATEWAY 覆盖，return/cancel 基址走 PAYPAL_RETURN_URL（默认 127.0.0.1:8081）。
+// gw 可被 PAY_GATEWAY 覆盖；return/cancel 基址默认跟随 server 实际监听地址（HOST:PORT），
+// 仅当 PAYPAL_RETURN_URL 显式设置时（如 docker/反代：发布端口≠监听端口）才覆盖。
 // 创建接口返回 JSON { ok, approve_url, paypal_order_id }（前端据此 window.location 跳转）；
 // PayPal 跳回 return?token=<pp_order_id>&order_no=<本地单号> 后服务端捕获并改状态。
 // 真实 PayPal 的差距（已知边界，见 README「支付 / Payment」节 S7/PayPal）：
@@ -102,7 +103,7 @@ func gen_paypal_block(pay): string {
   let csym = str(get(pay, "currency_symbol", "$"));
   let brand = str(get(pay, "brand", "lume-nsgm"));
   let wpath = str(get(pay, "webhook_path", ""));
-  let dflt_ret = "http://127.0.0.1:8081";
+  // 默认回跳基址改为跟随监听地址（见下方 _dflt_ret 推导），不再写死。
   // 退款关联列（可配置，默认与示例配置的 order 模块对齐）：捕获成功后回填，
   // 退款路由凭 capture_id 退；旧订单无回填时由 pay.paypal_get_order 反查兜底。
   let ppidf = str(get(pay, "paypal_order_field", "paypal_order_id"));
@@ -121,6 +122,12 @@ func gen_paypal_block(pay): string {
     + "let PAYPAL_CLIENT_SECRET_RAW = env(\"" + secret_env + "\");\n"
     + "let PAYPAL_GATEWAY_RAW = env(\"PAY_GATEWAY\");\n"
     + "let PAYPAL_RETURN_RAW = env(\"PAYPAL_RETURN_URL\");\n"
+    + "// 回跳基址默认跟随 server 实际监听地址（与 server 块同口径）；\n"
+    + "// 0.0.0.0 绑定全部网卡、浏览器不可达，回跳改用 localhost。\n"
+    + "let _lh = (env(\"HOST\") != null && env(\"HOST\") != \"\") ? env(\"HOST\") : \"127.0.0.1\";\n"
+    + "let _lp = (env(\"PORT\") != null && env(\"PORT\") != \"\") ? int(env(\"PORT\")) : 8081;\n"
+    + "let _rh = (_lh == \"0.0.0.0\" || _lh == \"\") ? \"localhost\" : _lh;\n"
+    + "let _dflt_ret = \"http://\" + _rh + \":\" + str(_lp);\n"
     + "let PAYPAL_CFG = {\n"
     + "  \"gw\": (PAYPAL_GATEWAY_RAW != null && PAYPAL_GATEWAY_RAW != \"\" ? str(PAYPAL_GATEWAY_RAW) : pay.paypal_base_url(\"" + mode + "\")),\n"
     + "  \"client_id\": PAYPAL_CLIENT_ID,\n"
@@ -128,7 +135,7 @@ func gen_paypal_block(pay): string {
     + "  \"currency\": \"" + currency + "\",\n"
     + "  \"brand\": \"" + brand + "\"\n"
     + "};\n"
-    + "let PAYPAL_RETURN_BASE = (PAYPAL_RETURN_RAW != null && PAYPAL_RETURN_RAW != \"\") ? str(PAYPAL_RETURN_RAW) : \"" + dflt_ret + "\";\n"
+    + "let PAYPAL_RETURN_BASE = (PAYPAL_RETURN_RAW != null && PAYPAL_RETURN_RAW != \"\") ? str(PAYPAL_RETURN_RAW) : _dflt_ret;\n"
     + "let csym = \"" + csym + "\";\n\n"
     // ---- post /api/pay/create：建单，返回 approve_url（前端跳转）----
     + "post \"/api/pay/create\", func(req) {\n"
