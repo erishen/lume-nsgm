@@ -12,9 +12,9 @@ let fs = [
   { "name": "create_date", "type": "timestamp", "system": 1, "showInList": 1, "comment": "创建时间" }
 ];
 
-let page = rg.gen_page_tsx("user", fs, len(fs), "", "");
-// 店面订单模块页：paid 行注入退款链接（rono/rst 来自 pay 配置字段）
-let order_page = rg.gen_page_tsx("order", fs, len(fs), "order_no", "status");
+let page = rg.gen_page_tsx("user", fs, len(fs), "", "", "");
+// 店面订单模块页：paid 行注入退款链接（rono/rst/csym 来自 pay 配置字段）
+let order_page = rg.gen_page_tsx("order", fs, len(fs), "order_no", "status", "$");
 let app = rg.gen_app_tsx([{ "name": "user", "label": "用户" }, { "name": "order", "label": "订单" }], 0);
 let app_shop = rg.gen_app_tsx([{ "name": "user", "label": "用户" }], 1);
 
@@ -45,6 +45,21 @@ fails = fails + a.assert_contains(order_page, "shop/refund/\" + encodeURICompone
 fails = fails + a.assert_contains(order_page, "=== \"paid\"", "t5: refund link gated on paid rows");
 fails = fails + a.assert_not_contains(order_page, "{{", "t5: no unrendered mustache in order page");
 fails = fails + a.assert_not_contains(page, "shop/refund", "t5: non-order page has no refund link");
+
+// 金额/状态列渲染（与 SSR 对齐）：订单页 *_cents 列出等宽金额、status 列出徽标
+fails = fails + a.assert_contains(order_page, "const CSYM = \"$\"", "t5: order page currency symbol injected");
+fails = fails + a.assert_contains(order_page, "f.name.endsWith(\"_cents\") ? \"money\" : \"\"", "t5: cents columns get money class");
+fails = fails + a.assert_contains(order_page, "f.name === \"status\"", "t5: status column renders badge");
+fails = fails + a.assert_contains(order_page, "st st-ok", "t5: paid status badge (green)");
+fails = fails + a.assert_contains(order_page, "st st-warn", "t5: pending status badge (amber)");
+fails = fails + a.assert_not_contains(page, "const CSYM = \"$\"", "t5: non-order page has no currency formatting");
+
+// 加载态 + 客户端排序（对齐 SSR 表头排序能力）
+fails = fails + a.assert_contains(page, "const [loaded, setLoaded] = useState(false)", "t5: loaded state avoids empty-state flash");
+fails = fails + a.assert_contains(page, "<div className=\"ico\">⏳</div>", "t5: loading row while !loaded");
+fails = fails + a.assert_contains(page, "className=\"sortable\"", "t5: sortable column headers");
+fails = fails + a.assert_contains(page, "function toggleSort(", "t5: header click toggles sort");
+fails = fails + a.assert_contains(page, "viewRows = sort ? [...rows].sort(", "t5: client-side sort applied to view rows");
 
 // App.tsx：路由装配 + NAV 注入
 fails = fails + a.assert_contains(app, "import UserPage from \"./pages/UserPage\"", "t5: App imports UserPage");

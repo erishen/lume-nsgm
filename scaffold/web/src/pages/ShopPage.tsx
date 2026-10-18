@@ -10,6 +10,7 @@ export default function ShopPage() {
   const [data, setData] = useState<ShopProductsResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState<number | null>(null);
+  const [toolBusy, setToolBusy] = useState(false);
   const [err, setErr] = useState("");
 
   async function load() {
@@ -38,15 +39,21 @@ export default function ShopPage() {
   }
 
   async function onSeed() {
+    if (toolBusy) return;
+    setToolBusy(true);
     setErr("");
     const r = await apiShopProducts("seed");
     setData(r);
+    setToolBusy(false);
   }
   async function onClear() {
+    if (toolBusy) return;
     if (!window.confirm("确定清空全部商品目录？（订单记录不受影响）")) return;
+    setToolBusy(true);
     setErr("");
     const r = await apiShopProducts("clear");
     setData(r);
+    setToolBusy(false);
   }
 
   const sym = data?.currency_symbol || "$";
@@ -58,10 +65,10 @@ export default function ShopPage() {
       </h1>
 
       <form className="toolbar">
-        <button type="button" className="ghost" onClick={onSeed}>
-          重新载入示例
+        <button type="button" className="ghost" disabled={toolBusy} onClick={onSeed}>
+          {toolBusy ? "处理中…" : "重新载入示例"}
         </button>
-        <a className="clear" href="#" onClick={(e) => { e.preventDefault(); onClear(); }}>
+        <a className="clear push" href="#" onClick={(e) => { e.preventDefault(); onClear(); }}>
           清空目录
         </a>
       </form>

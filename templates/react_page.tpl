@@ -14,6 +14,8 @@ type Field = {
 };
 
 const CTRL = "{{ctrl}}";
+// 货币符号（店面订单模块由生成器注入；空则 *_cents 列不做金额格式化）
+const CSYM = "{{csym}}";
 
 const FIELDS: Field[] = [
 {{#each fields as f}}  { name: "{{f.name}}", label: "{{f.label}}", form: {{f.form}}, search: {{f.search}}, required: {{f.required}}, list: {{f.list}}, input_type: "{{f.input_type}}", is_ts: {{f.is_ts}} },
@@ -25,6 +27,43 @@ const FORM_FIELDS = FIELDS.filter((f) => f.form === 1);
 const HAS_SEARCH = FIELDS.some((f) => f.search === 1);
 const PAGE_SIZE = 20;
 
+function money(v: unknown): string {
+  return CSYM + (Number(v || 0) / 100).toFixed(2);
+}
+
+function statusBadge(s: string): { cls: string; plain: boolean } {
+  if (s === "paid") return { cls: "st st-ok", plain: false };
+  if (s === "pending") return { cls: "st st-warn", plain: false };
+  if (s === "refunded") return { cls: "st st-mut", plain: false };
+  return { cls: "", plain: true };
+}
+
+// 列表单元格渲染：status 列出徽标、*_cents 列出等宽金额（与 SSR /order 对齐）
+function cellText(f: Field, row: Row): JSX.Element {
+  const raw = row[f.name];
+  const s = String(raw ?? "");
+  if (f.name === "status") {
+    const b = statusBadge(s);
+    return b.plain ? <>{s}</> : <span className={b.cls}>{s}</span>;
+  }
+  if (CSYM && f.name.endsWith("_cents")) {
+    return <>{money(raw)}</>;
+  }
+  return <>{s}</>;
+}
+
+// 客户端排序：可解析为数字的按数值比，其余按字符串 localeCompare
+function cmpRows(k: string, a: Row, b: Row): number {
+  const av = a[k];
+  const bv = b[k];
+  const an = Number(av);
+  const bn = Number(bv);
+  if (!isNaN(an) && !isNaN(bn) && String(av ?? "").trim() !== "" && String(bv ?? "").trim() !== "") {
+    return an - bn;
+  }
+  return String(av ?? "").localeCompare(String(bv ?? ""));
+}
+
 export default function {{Ctrl}}Page() {
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -33,6 +72,8 @@ export default function {{Ctrl}}Page() {
   const [editing, setEditing] = useState<Row | null>(null);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [sort, setSort] = useState<{ k: string; dir: 1 | -1 } | null>(null);
 
   async function load(p: number, query: string) {
     try {
@@ -42,6 +83,7 @@ export default function {{Ctrl}}Page() {
     } catch (e) {
       setErr(String(e));
     }
+    setLoaded(true);
   }
 
   useEffect(() => {
@@ -107,6 +149,12 @@ export default function {{Ctrl}}Page() {
     setPage(p);
   }
 
+  function toggleSort(k: string) {
+    setSort((prev) => (prev && prev.k === k ? (prev.dir === 1 ? { k, dir: -1 } : null) : { k, dir: 1 }));
+  }
+
+  const viewRows = sort ? [...rows].sort((a, b) => cmpRows(sort.k, a, b) * sort.dir) : rows;
+
   return (
     <div>
       <h1>
@@ -169,13 +217,29 @@ export default function {{Ctrl}}Page() {
           <thead>
             <tr>
               {LIST_FIELDS.map((f) => (
-                <th key={f.name}>{f.label}</th>
+                <th
+                  key={f.name}
+                  className="sortable"
+                  data-sort={sort && sort.k === f.name ? (sort.dir === 1 ? "asc" : "desc") : undefined}
+                  onClick={() => toggleSort(f.name)}
+                >
+                  {f.label}
+                </th>
               ))}
               <th className="op">操作</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {!loaded ? (
+              <tr>
+                <td colSpan={LIST_FIELDS.length + 1}>
+                  <div className="empty">
+                    <div className="ico">⏳</div>
+                    <p>加载中…</p>
+                  </div>
+                </td>
+              </tr>
+            ) : viewRows.length === 0 ? (
               <tr>
                 <td colSpan={LIST_FIELDS.length + 1}>
                   <div className="empty">
@@ -202,11 +266,11 @@ export default function {{Ctrl}}Page() {
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              viewRows.map((row) => (
                 <tr key={String(row.id)}>
                   {LIST_FIELDS.map((f) => (
-                    <td key={f.name}>
-                      {f.is_ts === 1 ? fmtTime(row[f.name]) : String(row[f.name] ?? "")}
+                    <td key={f.name} className={CSYM && f.name.endsWith("_cents") ? "money" : ""}>
+                      {f.is_ts === 1 ? fmtTime(row[f.name]) : cellText(f, row)}
                     </td>
                   ))}
                   <td className="op">

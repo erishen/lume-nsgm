@@ -135,11 +135,11 @@ export default function RefundPage({ ono }: { ono: string }) {
             onChange={(e) => setManual(e.target.checked)}
             style={{ width: "auto", marginTop: 0 }}
           />
-          已在 PayPal 后台手动退款，仅本地标记（不调 PayPal API）
-          <span className="muted" style={{ display: "block", fontSize: 12 }}>
-            也适用于「订单未扣款需关单」的场景：PayPal 侧没有可退款项时，勾选后仅把本地订单置为已退款。
-          </span>
+          <span>已在 PayPal 后台手动退款，仅本地标记（不调 PayPal API）</span>
         </label>
+        <span className="muted" style={{ display: "block", fontSize: 12, marginTop: -6 }}>
+          也适用于「订单未扣款需关单」的场景：PayPal 侧没有可退款项时，勾选后仅把本地订单置为已退款。
+        </span>
         <div className="form-actions">
           <button type="submit" className="btn primary" disabled={busy}>
             {busy ? "处理中…" : manual ? "标记退款" : "确认退款"}
