@@ -38,11 +38,15 @@ func page_fields(fs, n: int) {
 }
 
 // 每模块 React 页面：web/src/pages/<Ctrl>Page.tsx
-export func gen_page_tsx(ctrl: string, fs, n: int): string {
+// rono/rst 非空时（店面订单模块）：操作列对 status=paid 行注入「退款」链接
+// （跳 #/shop/refund/:ono，与 SSR /order 列表的退款入口对齐）
+export func gen_page_tsx(ctrl: string, fs, n: int, rono: string, rst: string): string {
   let ctx = {
     "Ctrl": cap(ctrl),
     "ctrl": ctrl,
-    "fields": page_fields(fs, n)
+    "fields": page_fields(fs, n),
+    "refund_ono": rono,
+    "refund_status": rst
   };
   let tpl_text = read_file("templates/react_page.tpl");
   if (tpl_text == null) { return "// ERROR: templates/react_page.tpl missing"; }
@@ -215,7 +219,14 @@ export func gen_web(out: string, mods, shop, pay): int {
     if (name != "") {
       let fs = get(mod, "fields", null);
       let n = len(fs);
-      let text = gen_page_tsx(name, fs, n);
+      // 店面订单模块：React 页操作列注入退款链接（paid 行），与 SSR /order 对齐
+      let rono = "";
+      let rst = "";
+      if (hasShop && name == str(get(shop, "order_module", ""))) {
+        rono = str(get(pay, "order_no_field", "order_no"));
+        rst = str(get(pay, "status_field", "status"));
+      }
+      let text = gen_page_tsx(name, fs, n, rono, rst);
       write_file(out + "/web/src/pages/" + cap(name) + "Page.tsx", text);
     }
     i = i + 1;

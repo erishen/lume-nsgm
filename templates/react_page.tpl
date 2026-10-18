@@ -210,6 +210,13 @@ export default function {{Ctrl}}Page() {
                     </td>
                   ))}
                   <td className="op">
+{{#if refund_ono}}
+                    {String(row["{{refund_status}}"]) === "paid" ? (
+                      <a className="refund" href={"#/shop/refund/" + encodeURIComponent(String(row["{{refund_ono}}"] ?? ""))}>
+                        退款
+                      </a>
+                    ) : null}
+{{/if}}
                     <a href={"#/" + CTRL} onClick={(e) => openEdit(row, e)}>
                       编辑
                     </a>
