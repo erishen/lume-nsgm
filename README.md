@@ -311,6 +311,8 @@ python3 scripts/mock_pay_gateway.py --port 18097
 
 > Default mock gateway credentials (the app side and the gateway side must match, or authentication fails): `MOCK_PAYPAL_CLIENT_ID=AUmock_client_id_sandbox_001` / `MOCK_PAYPAL_CLIENT_SECRET=e2e-mock-key` (corresponding to the config's `client_id` and `PAYPAL_KEY`). Changing values requires changing both sides.
 
+> **Local run picks up `.env`**: `make serve` / `make dev` now export `PAYPAL_KEY`, `PAYPAL_CLIENT_ID`, `PAY_GATEWAY`, `PAYPAL_RETURN_URL` (plus `NSGM_DB` / `PORT` / `HOST` / `WORKERS`) from `.env` into the lume-core process — no more `PAYPAL_KEY=...` prefix needed. For a **real PayPal sandbox**, put your real `PAYPAL_CLIENT_ID` in `.env` (the config's `client_id` is the mock placeholder `AUmock_client_id_sandbox_001` by default and the generated code falls back to it; override it via the `PAYPAL_CLIENT_ID` env) alongside `PAYPAL_KEY`; the default gateway is `api-m.sandbox.paypal.com`. For **local-only testing without real credentials**, run `python3 scripts/mock_pay_gateway.py --port 18097` and launch with `PAY_GATEWAY=http://127.0.0.1:18097` using the mock client_id/secret so both sides match.
+
 The `pay` section of the config (fully validated by `validate_pay` in `lib/validate.lume`):
 
 | Key | Meaning |

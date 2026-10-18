@@ -9,6 +9,19 @@ TARGET = main.lume
 # 生成输出目录（run / run-paypal 透传 out=$(OUT)；可 make run-paypal OUT=/tmp/x 指定）
 OUT ?= ./gen
 
+# 把 .env 里的密钥/运行时变量导出给 lume-core 子进程：lume-core 的 env() 只读进程环境，
+# 不会自己解析 .env；-include .env 只设 Make 变量、不导出，故这里显式 export。
+# 这样 make serve / make dev 自动吃 .env，无需手动 PAYPAL_KEY=... 前缀。
+# 命令行覆盖（如 PORT=18082 make serve）优先级高于 .env，因为 export 导出的是 Make 变量最终值。
+export PAYPAL_KEY
+export PAYPAL_CLIENT_ID
+export PAY_GATEWAY
+export PAYPAL_RETURN_URL
+export NSGM_DB
+export PORT
+export HOST
+export WORKERS
+
 .PHONY: run run-paypal base dev create init check check-privacy test serve web-install clean \
         docker-build docker-up docker-down docker-logs docker-ps docker-clean \
         test-e2e
