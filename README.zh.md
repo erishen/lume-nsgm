@@ -37,7 +37,7 @@ schema validation failed (2 error(s)) in "bad.json":
 fix the config and re-run. ...
 ```
 
-校验项：JSON 合法性、`modules` 非空、模块/字段 `name` 必须匹配 `[a-z][a-z0-9_]*`（**该名直接拼进 SQL DDL 与路由，白名单同时封死注入面**——曾实测 `"evil\"; DROP TABLE x--"` 可穿过无校验的生成器）、类型白名单、模块/字段重名（路由冲突）、空 `fields`。校验失败退出码 1，生成被完全跳过（此前缺 name 的模块会被静默跳过并谎报成功）。回归测试见 `tests/t6.lume`（16 断言）。
+校验项：JSON 合法性、`modules` 非空、模块/字段 `name` 必须匹配 `[a-z][a-z0-9_]*`（**该名直接拼进 SQL DDL 与路由，白名单同时封死注入面**——曾实测 `"evil\"; DROP TABLE x--"` 可穿过无校验的生成器）、类型白名单、模块/字段重名（路由冲突）、空 `fields`、字段级 `default` 必须是单引号字面量（该值原样拼进 DDL，SQL 片段注入面）。校验失败退出码 1，生成被完全跳过（此前缺 name 的模块会被静默跳过并谎报成功）。回归测试见 `tests/t6.lume`（19 断言）。
 
 ## 目录
 
@@ -70,8 +70,8 @@ lume-nsgm/
 │   ├── t3.lume          # 模板引擎验证（each / if / 变量替换）
 │   ├── t4.lume          # sql_default() 回归断言
 │   ├── t5.lume          # React 前端生成器回归断言
-│   ├── t6.lume          # schema 校验回归断言（16 断言，validate.lume）
-│   └── t7.lume          # 支付回归断言（签名向量 / validate_pay / 字段 default）
+│   ├── t6.lume          # schema 校验回归断言（19 断言，validate.lume）
+│   └── t7.lume          # 支付回归断言（签名向量 / validate_pay）
 ├── scripts/
 │   ├── mock_pay_gateway.py  # 模拟 PayPal 网关（OAuth2/建单/捕获/查单/查捕获/退款，独立实现与 lume 侧交叉验证）
 │   ├── check-privacy.py     # 发布前隐私自检（跟踪文件里的本机路径/私有工作区名/凭据形态）
@@ -396,7 +396,7 @@ pay.paypal_verify_webhook(secret, id, ts, body, sign_hex)    // HMAC(id\n+ts\n+b
   「退款」入口、refunded 行无操作）——金额/订单号已被网关侧引用（退款按行金额），
   后台篡改会破坏对账；`pending` 单照常可编辑（手工调整合法）
 
-回归：`make test` 含 t7（PayPal 已知向量 / validate_pay / 字段 default）；
+回归：`make test` 含 t7（PayPal 已知向量 / validate_pay）；
 `make test-e2e` 固化 PayPal 沙箱全链路——建单 → approve_url → return 捕获 →
 `status:"paid"` → 重复 return 幂等 → webhook 验签 → 收银台复用防孤儿单 →
 退款与库存回补 → **早期订单双空关联 ID 恢复**（`need_recover` 提示 → `/shop/recover/:ono`

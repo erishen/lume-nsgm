@@ -7,7 +7,7 @@
 //      字段必须真实存在、webhook_path 形状、provider 遗留键必须为 paypal；
 //      pay 缺失时零错误；
 //      validate_shop：店面键（含 P1-2 商品快照/库存三键）存在性与依赖校验
-//   C) 字段级 default：单引号字面量放行、注入形状拒绝（DDL 注入面）
+//   （字段级 default 的校验回归见 tests/t6.lume）
 // main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
 
 import "../scaffold/lib/pay.lume" as pay;
@@ -214,26 +214,6 @@ func main() {
   // pay 缺失时店面不生成，新键惰性无副作用
   f = f + a.assert_true(len(v.validate_shop(good_stock, null, mods)) == 0,
     "t7: shop snapshot keys inert without pay");
-
-  // ---------- C) 字段级 default ----------
-
-  func cfg_with_default(dv) {
-    return { "modules": [
-      { "name": "order", "fields": [
-        { "name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1 },
-        { "name": "status", "type": "varchar", "default": dv }
-      ] }
-    ] };
-  }
-
-  f = f + a.assert_true(any_contains(v.validate_config(cfg_with_default("'pending'")), "x") == 0,
-    "t7: quoted-literal default must pass");
-  f = f + a.assert_true(any_contains(v.validate_config(cfg_with_default("x'; DROP TABLE order;--")),
-      "\"default\" must be a single-quoted literal"),
-    "t7: injection-shaped default must be rejected");
-  f = f + a.assert_true(any_contains(v.validate_config(cfg_with_default("pending")),
-      "\"default\" must be a single-quoted literal"),
-    "t7: unquoted default must be rejected");
 
   print("t7: " + str(f) + " failure(s)");
   return f;

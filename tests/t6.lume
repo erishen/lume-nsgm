@@ -7,6 +7,7 @@
 //   4) 字段缺 name/type、未知类型、非法字段名、字段名重复
 //   5) 模块名重复（路由冲突）
 //   6) 报错必须带路径前缀 modules[i]（AI 修复定位用）
+//   7) 字段级 default 必须是单引号字面量（原样进 DDL，SQL 片段注入面）
 // main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
 
 import "../lib/validate.lume" as v;
@@ -69,6 +70,17 @@ func main() {
   f = f + a.assert_true(has({"modules": [{"name": "u", "fields": [
     {"name": "dup", "type": "varchar"}, {"name": "dup", "type": "varchar"}]}]}, "duplicate field name"),
     "t6: duplicate field names must be reported");
+
+  // 字段级 default 原样拼进 DDL：合法单引号字面量放行，SQL 片段必须被拒
+  func cfg_def(dv) {
+    return { "modules": [{"name": "o", "fields": [
+      {"name": "status", "type": "varchar", "default": dv}]}] };
+  }
+  f = f + a.assert_true(ok(cfg_def("'pending'")), "t6: quoted-literal default must pass");
+  f = f + a.assert_true(has(cfg_def("x'); DROP TABLE o--"), "must be a single-quoted literal"),
+    "t6: injection-shaped default must be rejected (DDL injection surface)");
+  f = f + a.assert_true(has(cfg_def("pending"), "\"default\" must be a single-quoted literal"),
+    "t6: unquoted default must be rejected");
 
   // 报错路径必须可定位（AI 修复依赖）
   let errs = v.validate_config({"modules": [

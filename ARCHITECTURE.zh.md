@@ -99,8 +99,8 @@ scaffold.lume ── 文件树写入：静态基座（scaffold/）+ 生成内容
 | `tests/t3.lume` | 模板引擎（each / if / 变量替换） |
 | `tests/t4.lume` | `sql_default()` 回归 |
 | `tests/t5.lume` | React 前端生成器回归 |
-| `tests/t6.lume` | schema 校验回归（16 断言） |
-| `tests/t7.lume` | 支付回归（签名向量 / validate_pay / 字段 default） |
+| `tests/t6.lume` | schema 校验回归（19 断言） |
+| `tests/t7.lume` | 支付回归（签名向量 / validate_pay） |
 | `scripts/e2e.sh` | 起生成工程 + curl 跑 SSR/CRUD/搜索/分页/迁移/支付全链路 |
 | `make check-privacy` | 发布前隐私自检（挂 `make test` 前置闸） |
 

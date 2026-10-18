@@ -39,7 +39,7 @@ schema validation failed (2 error(s)) in "bad.json":
 fix the config and re-run. ...
 ```
 
-Validation covers: JSON well-formedness, non-empty `modules`, module/field names matching `[a-z][a-z0-9_]*` (**the name is interpolated straight into SQL DDL and routes, so the whitelist closes the injection surface at the same time** — `"evil\"; DROP TABLE x--"` was empirically shown to slip through an unvalidated generator), a type whitelist, duplicate module/field names (route conflicts), and empty `fields`. A failed validation exits with code 1 and generation is skipped entirely (previously, a module missing a name was silently skipped while still reporting success). Regression tests: `tests/t6.lume` (16 assertions).
+Validation covers: JSON well-formedness, non-empty `modules`, module/field names matching `[a-z][a-z0-9_]*` (**the name is interpolated straight into SQL DDL and routes, so the whitelist closes the injection surface at the same time** — `"evil\"; DROP TABLE x--"` was empirically shown to slip through an unvalidated generator), a type whitelist, duplicate module/field names (route conflicts), empty `fields`, and a field-level `default` that must be a single-quoted literal (the value is spliced verbatim into the DDL—a SQL-fragment injection surface). A failed validation exits with code 1 and generation is skipped entirely (previously, a module missing a name was silently skipped while still reporting success). Regression tests: `tests/t6.lume` (19 assertions).
 
 ## Layout
 
@@ -72,8 +72,8 @@ lume-nsgm/
 │   ├── t3.lume          # template engine verification (each / if / variable substitution)
 │   ├── t4.lume          # sql_default() regression assertions
 │   ├── t5.lume          # React frontend generator regression assertions
-│   ├── t6.lume          # schema validation regression assertions (16 assertions, validate.lume)
-│   └── t7.lume          # payment regression assertions (signature vectors / validate_pay / field defaults)
+│   ├── t6.lume          # schema validation regression assertions (19 assertions, validate.lume)
+│   └── t7.lume          # payment regression assertions (signature vectors / validate_pay)
 ├── scripts/
 │   ├── mock_pay_gateway.py  # mock PayPal gateway (OAuth2/create/capture/get order/get capture/refund — an independent implementation cross-checked against the lume side)
 │   ├── check-privacy.py     # pre-publish privacy self-check (local paths / private workspace names / credential forms in tracked files)
@@ -362,7 +362,7 @@ Known boundaries (details in TODO.md S7):
 - **Order number ≠ transaction number**: the "Transaction ID" in the PayPal dashboard is the **capture ID**; entering it as the order number makes `GET /v2/checkout/orders/{id}` return 404 `RESOURCE_NOT_FOUND`/`INVALID_RESOURCE_ID` (empirically confirmed against the real sandbox on 2026-10-17) — after an order reverse-lookup 404, the refund route automatically retries against `GET /v2/payments/captures/{id}`, reverses the real order number via `supplementary_data.related_ids.order_id`, and backfills both columns with the correct values
 - **Order reconciliation guard**: once a storefront order is `paid`/`refunded`, admin edits/deletes are rejected by the `row_locked` guard (SSR `/order/save|del` returns a flash error page; JSON `/api/order/update|delete` returns `{ok:false,err:"order_locked"}`), and the order-list action column locks in sync (paid rows keep only the "Refund" entry, refunded rows show no actions) — the amount/order number are already referenced by the gateway side (refunds charge the row amount), so tampering would break reconciliation; `pending` orders remain editable (legitimate manual adjustments)
 
-Regression: `make test` includes t7 (PayPal known-answer vectors / validate_pay / field defaults); `make test-e2e` locks in the full PayPal sandbox chain — create → approve_url → return capture → `status:"paid"` → idempotent repeat return → webhook verification → cashier reuse against orphan orders → refund and stock restock → **early-order recovery with both association IDs empty** (`need_recover` hint → the `/shop/recover/:ono` form's `capid` direct route / `ppid` reverse lookup / `manual` local marking / **transaction number (capture ID) typed into the order-number field, auto-retried against the capture endpoint** — all four paths end with `refunded` persisted) → **order reconciliation guard** (`row_locked`: paid/refunded admin edits/deletes rejected on both SSR and JSON, pending allowed) → **product catalog example seeding and clear-and-reload** (empty table auto-seeds → `?act=clear` clears without touching orders → no auto-resurrection → `?act=seed` manual reload → non-empty guard).
+Regression: `make test` includes t7 (PayPal known-answer vectors / validate_pay); `make test-e2e` locks in the full PayPal sandbox chain — create → approve_url → return capture → `status:"paid"` → idempotent repeat return → webhook verification → cashier reuse against orphan orders → refund and stock restock → **early-order recovery with both association IDs empty** (`need_recover` hint → the `/shop/recover/:ono` form's `capid` direct route / `ppid` reverse lookup / `manual` local marking / **transaction number (capture ID) typed into the order-number field, auto-retried against the capture endpoint** — all four paths end with `refunded` persisted) → **order reconciliation guard** (`row_locked`: paid/refunded admin edits/deletes rejected on both SSR and JSON, pending allowed) → **product catalog example seeding and clear-and-reload** (empty table auto-seeds → `?act=clear` clears without touching orders → no auto-resurrection → `?act=seed` manual reload → non-empty guard).
 
 ### Storefront (the shop section, customer-facing e-commerce UI)
 
