@@ -121,8 +121,9 @@ fi
 # ---- 支付阶段（PayPal）：建单 -> OAuth2 建单 -> approve_url -> return 捕获 -> 状态落库 -> 幂等 -> webhook ----
 # 场景：example-paypal.json 生成带 pay 接线的工程，独立端口起 PayPal mock 网关。
 # OAuth2 的 Basic 凭证用 Python 侧独立 base64 实现交叉验证；approve_url 指向 mock
-# 收银台，curl -L 模拟浏览器 approve 后 302 跳回应用的 /api/pay/return（带 token），
-# 应用捕获并改状态。
+# 收银台。全量 SPA 后回跳走 /spa/#/pay/return hash 路由、由前端调 /api/pay/return
+# 捕获 —— e2e 从 approve_url 提取 token 后直接调 /api/pay/return（与 SPA 行为一致；
+# curl -L 跟 302 只会拿到 SPA 壳，不会触发捕获）。
 if command -v python3 >/dev/null 2>&1; then
   echo "==> 支付阶段(PayPal)：生成 example-paypal.json 工程 ..."
   kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; PID=""
@@ -188,97 +189,108 @@ PY
   APPROVE_URL="$(echo "$CREATE_RESP" | grep -o '"approve_url":"[^"]*"' | head -1 | sed 's/"approve_url":"//;s/"$//')"
   echo "$APPROVE_URL" | grep -q "mock/paypal/approve" \
     || fail "approve_url 应指向 mock 收银台: $APPROVE_URL"
-  # 3) 模拟浏览器 approve：跟 302 跳回 app /api/pay/return?token=...&order_no=... -> 捕获 -> paid
-  RT="$(curl -s --noproxy '*' -L -o /dev/null -w '%{http_code}' "$APPROVE_URL")"
-  [ "$RT" = "200" ] || fail "approve 跳转后 return 应 200 (got $RT)"
+  # 3) 全量 SPA：PayPal 回跳走 hash 路由（/spa/#/pay/return），由前端调 /api/pay/return 捕获。
+  #    e2e 等价地直接调 /api/pay/return（与 SPA 行为一致），不再跟 302 到 SPA 壳（壳不触发捕获）。
+  RT_TOKEN="$(echo "$APPROVE_URL" | sed -E 's/.*[?&]token=([^&"]*).*/\1/')"
+  [ -n "$RT_TOKEN" ] || fail "approve_url 应带 token（PayPal 订单号）"
+  RT_RESP="$(curl -s --noproxy '*' "$PPB/api/pay/return?order_no=$ONO&token=$RT_TOKEN")"
+  echo "$RT_RESP" | grep -q '"status":"paid"' || fail "PayPal 捕获后 status 应为 paid: $RT_RESP"
   curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"status":"paid"' \
-    || fail "PayPal 捕获后 status 应为 paid"
-  # 4) 幂等：重复 approve（同 token）-> 仍 paid，不产生新行
-  RT2="$(curl -s --noproxy '*' -L -o /dev/null -w '%{http_code}' "$APPROVE_URL")"
-  [ "$RT2" = "200" ] || fail "重复 approve 应仍 200"
-  [ "$(total_of "$PPB/api/order")" = "1" ] || fail "重复 approve 不应产生新行"
+    || fail "PayPal 捕获后落库应为 paid"
+  # 4) 幂等：重复调 return（同 token）-> 仍 paid，不产生新行
+  RT_RESP2="$(curl -s --noproxy '*' "$PPB/api/pay/return?order_no=$ONO&token=$RT_TOKEN")"
+  echo "$RT_RESP2" | grep -q '"status":"paid"' || fail "重复 return 应仍 paid"
+  [ "$(total_of "$PPB/api/order")" = "1" ] || fail "重复 return 不应产生新行"
   curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"status":"paid"' \
-    || fail "重复 approve 后 status 仍应为 paid"
+    || fail "重复 return 后 status 仍应为 paid"
   # 5) webhook 负例：坏签名 -> 401
   BAD_WH="$(curl -s --noproxy '*' -X POST "$PPB/api/pay/webhook" \
     -H 'Content-Type: application/json' \
     -d '{"verify_id":"x","verify_ts":"1","verify_sign":"deadbeef","payload":"{}"}')"
-  echo "$BAD_WH" | grep -q 'signature mismatch' || fail "PayPal webhook 坏签名应拒: $BAD_WH"
-  # 5b) 未知订单号存在性检查：不进捕获流程，回错误页而非成功页
-  curl -s --noproxy '*' "$PPB/api/pay/return?order_no=NOPE-PP&token=MOCK-PP-ORDER-x" | grep -q '不存在' \
+  echo "$BAD_WH" | grep -q 'signature_mismatch' || fail "PayPal webhook 坏签名应拒: $BAD_WH"
+  # 5b) 未知订单号存在性检查：不进捕获流程，回错误（订单不存在）
+  curl -s --noproxy '*' "$PPB/api/pay/return?order_no=NOPE-PP&token=MOCK-PP-ORDER-x" | grep -q '订单不存在' \
     || fail "未知订单的 return 应提示订单不存在"
-  # 6) 店面（PayPal 变体）：列表/收银台/结果页都应明示 PayPal、价格以 $ 计价
-  PP_SHOP="$(curl -s --noproxy '*' "$PPB/shop")"
-  echo "$PP_SHOP" | grep -q 'PayPal' || fail "PayPal 店面应明示支付方式 PayPal: $(echo "$PP_SHOP" | head -5)"
-  echo "$PP_SHOP" | grep -q '\$399.00' || fail "PayPal 店面价格应以 \$ 计价（分->x.xx）"
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/buy/1" || fail "PayPal 店面购买请求失败"
-  PP_SONO="$(curl -s --noproxy '*' "$PPB/api/order" | grep -oE '"order_no":"SHOP-[^"]*"' | head -1 | sed 's/"order_no":"//;s/"$//')"
+  # 6) 店面（PayPal 变体）：全量 SPA 后页面由 React 渲染，后端只出 JSON —— 断言走 JSON 端点。
+  PP_PROD="$(curl -s --noproxy '*' "$PPB/api/shop/products")"
+  echo "$PP_PROD" | grep -q '"currency_symbol":"\$"' || fail "PayPal 店面应以 \$ 计价: $(echo "$PP_PROD" | head -c 200)"
+  echo "$PP_PROD" | grep -q '"name":"Lume 机械键盘"' || fail "PayPal 店面应有示例商品"
+  echo "$PP_PROD" | grep -q '"price_cents":39900' || fail "PayPal 店面键盘价格应为 39900（分）"
+  echo "$PP_PROD" | grep -q '"stock":10' || fail "PayPal 店面键盘库存应为 10"
+  echo "$PP_PROD" | grep -q '"stock":0' || fail "PayPal 店面马克杯库存应为 0（售罄态由前端渲染）"
+  # 下单：POST /api/shop/buy -> 收银台 JSON（order_no + approve_url）
+  PP_BUY="$(curl -s --noproxy '*' -X POST "$PPB/api/shop/buy" -H 'Content-Type: application/json' -d '{"product_id":1}')"
+  echo "$PP_BUY" | grep -q '"order_no":"SHOP-' || fail "PayPal 店面购买应产生 SHOP-* 订单: $PP_BUY"
+  PP_SONO="$(echo "$PP_BUY" | grep -o '"order_no":"SHOP-[^"]*"' | head -1 | sed 's/"order_no":"//;s/"$//')"
   [ -n "$PP_SONO" ] || fail "PayPal 店面购买应产生 SHOP-* 订单"
   # 商品快照（P1-2）：订单行回填商品 id + 下单时定格商品名（后台列表直接可见）
   curl -s --noproxy '*' "$PPB/api/order?q=$PP_SONO" | grep -q '"product_id":1' \
     || fail "店面下单应回填 product_id"
   curl -s --noproxy '*' "$PPB/api/order?q=$PP_SONO" | grep -q '"product_name":"Lume 机械键盘"' \
     || fail "店面下单应定格商品名快照"
-  # 库存展示（P1-2）：种子键盘 10 / 卫衣 5 / 马克杯 0（售罄态按钮置灰不可点）
-  echo "$PP_SHOP" | grep -q '库存 10' || fail "店面应展示库存数量"
-  echo "$PP_SHOP" | grep -q '已售罄' || fail "0 库存商品应展示已售罄"
-  echo "$PP_SHOP" | grep -q 'btn disabled' || fail "售罄商品购买按钮应置灰"
   # 扣库存：键盘 10 -> 9（JSON 列序固定，price_cents 唯一可定位到行）
   [ "$(curl -s --noproxy '*' "$PPB/api/product" | grep -o '"price_cents":39900,"stock":[0-9]*' | head -1 | sed 's/.*://')" = "9" ] \
     || fail "下单后键盘库存应 10->9"
-  # 售罄拒单（P1-2）：0 库存商品（马克杯）被守卫拒掉，不建单、不误扣
+  # 售罄拒单（P1-2）：0 库存商品（马克杯 id=3）被守卫拒掉，不建单、不误扣
   NSO_BEFORE="$(curl -s --noproxy '*' "$PPB/api/order" | grep -oE '"order_no":"SHOP-[^"]*"' | wc -l | tr -d ' ')"
-  curl -s --noproxy '*' "$PPB/shop/buy/3" | grep -q '已售罄' || fail "0 库存商品购买应提示已售罄"
+  SOLD_OUT="$(curl -s --noproxy '*' -X POST "$PPB/api/shop/buy" -H 'Content-Type: application/json' -d '{"product_id":3}')"
+  echo "$SOLD_OUT" | grep -q '已售罄' || fail "0 库存商品购买应提示已售罄: $SOLD_OUT"
   NSO_AFTER="$(curl -s --noproxy '*' "$PPB/api/order" | grep -oE '"order_no":"SHOP-[^"]*"' | wc -l | tr -d ' ')"
   [ "$NSO_BEFORE" = "$NSO_AFTER" ] || fail "售罄拒单不应产生订单（$NSO_BEFORE -> $NSO_AFTER）"
-  PP_PAY_HTML="$(curl -s --noproxy '*' "$PPB/shop/pay/$PP_SONO")"
-  echo "$PP_PAY_HTML" | grep -q '前往 PayPal 支付' || fail "PayPal 收银台应展示前往 PayPal 支付: $(echo "$PP_PAY_HTML" | head -8)"
+  # 收银台（JSON）：含 approve_url
+  PP_CASH="$(curl -s --noproxy '*' "$PPB/api/shop/cashier/$PP_SONO")"
+  echo "$PP_CASH" | grep -q '"approve_url":' || fail "PayPal 收银台应返回 approve_url: $PP_CASH"
   # 收银台复用（孤儿单防护）：建单成功即回填 paypal_order_id；再渲染一次收银台
   # 凭已回填 ID 重建 approve 链接，不向 PayPal 重复建单（刷新/重试不再堆孤儿单）
   curl -s --noproxy '*' "$PPB/api/order?q=$PP_SONO" | grep -q '"paypal_order_id":"MOCK-PP-ORDER-' \
     || fail "收银台建单后应回填 paypal_order_id"
   PP_CNT1="$(curl -s --noproxy '*' "$PMB/mock/paypal/orders" | grep -o '"orders":[0-9]*' | sed 's/.*://')"
-  PP_PAY2_HTML="$(curl -s --noproxy '*' "$PPB/shop/pay/$PP_SONO")"
+  PP_CASH2="$(curl -s --noproxy '*' "$PPB/api/shop/cashier/$PP_SONO")"
   PP_CNT2="$(curl -s --noproxy '*' "$PMB/mock/paypal/orders" | grep -o '"orders":[0-9]*' | sed 's/.*://')"
   [ "$PP_CNT1" = "$PP_CNT2" ] || fail "重复渲染收银台不应新增 PayPal 建单（$PP_CNT1 -> $PP_CNT2）"
-  echo "$PP_PAY2_HTML" | grep -q '前往 PayPal 支付' || fail "复用渲染的收银台仍应展示支付入口"
-  # 支付店面单（PayPal 路径）：跟 approve 302 -> return 捕获 -> paid（退款回补探针的前提）
-  PP_SONO_APPROVE="$(echo "$PP_PAY2_HTML" | grep -oE 'http://[^"]*mock/paypal/approve\?token=[^"]+' | head -1)"
+  echo "$PP_CASH2" | grep -q '"approve_url":' || fail "复用渲染的收银台仍应返回支付入口"
+  # 支付店面单（PayPal 路径）：取 approve_url 的 token -> 直接调 /api/pay/return 捕获（SPA 同行为）
+  PP_SONO_APPROVE="$(echo "$PP_CASH2" | grep -o '"approve_url":"[^"]*"' | head -1 | sed 's/"approve_url":"//;s/"$//')"
   [ -n "$PP_SONO_APPROVE" ] || fail "店面收银台应给出 approve 链接"
-  RT_SONO="$(curl -s --noproxy '*' -L -o /dev/null -w '%{http_code}' "$PP_SONO_APPROVE")"
-  [ "$RT_SONO" = "200" ] || fail "店面单 approve 跳转后 return 应 200 (got $RT_SONO)"
-  curl -s --noproxy '*' "$PPB/api/order?q=$PP_SONO" | grep -q '"status":"paid"' \
-    || fail "店面单支付后应落库 paid"
-  curl -s --noproxy '*' "$PPB/shop/result/$PP_SONO" | grep -q 'PayPal' || fail "PayPal 结果页应明示 PayPal"
-  curl -s --noproxy '*' "$PPB/shop/result/NOPE-1" | grep -q 'PayPal' || fail "PayPal 订单不存在页应明示 PayPal"
-  echo "ok   店面(PayPal)：列表明示 PayPal + \$ 计价 -> 收银台 approve_url -> 结果页徽标"
-  echo "ok   支付(PayPal)：建单 -> OAuth2 建单 -> approve_url -> return 捕获 -> pending->paid -> 幂等 -> webhook 验签"
+  PP_SONO_TOKEN="$(echo "$PP_SONO_APPROVE" | sed -E 's/.*[?&]token=([^&"]*).*/\1/')"
+  [ -n "$PP_SONO_TOKEN" ] || fail "店面 approve_url 应带 token"
+  RT_SONO_RESP="$(curl -s --noproxy '*' "$PPB/api/pay/return?order_no=$PP_SONO&token=$PP_SONO_TOKEN")"
+  echo "$RT_SONO_RESP" | grep -q '"status":"paid"' || fail "店面单支付后应落库 paid: $RT_SONO_RESP"
+  # 结果页（JSON）：paid
+  curl -s --noproxy '*' "$PPB/api/shop/result/$PP_SONO" | grep -q '"status":"paid"' \
+    || fail "PayPal 结果页应 paid"
+  curl -s --noproxy '*' "$PPB/api/shop/result/NOPE-1" | grep -q '订单不存在' \
+    || fail "未知订单结果页应提示不存在"
+  echo "ok   店面(PayPal)：JSON 列表 \$ 计价/库存 -> 下单回填快照 -> 售罄拒单 -> 收银台 approve_url -> 结果页 paid"
 
   # ---- 幂等（ik）：同 ik 重复点击/刷新复用同一笔 pending 单；已支付则开新单（重买）----
-  # 用户明确诉求：避免重复下单。商品列表「购买」链接带 ik（幂等 Key）= id-now()，
-  # 下单 GET /shop/buy/:id?ik= 复用同一笔 pending 单；已支付后再点同 ik 开新单（SHOP-<ik>-r<ts>）。
+  # 用户明确诉求：避免重复下单。SPA 下单走 POST /api/shop/buy（可带 ik 幂等 Key），
+  # 复用同一笔 pending 单；已支付后再点同 ik 开新单（SHOP-<ik>-r<ts>）。
   echo "==> 幂等（ik）阶段：重复下单复用同一笔 pending 单，已支付开新单 ..."
   IK="IDEM-$(date +%s%N)"
-  [ "$(code "$PPB/shop/buy/1?ik=$IK")" = "200" ] || fail "幂等首购应 200"
+  [ "$(code -X POST "$PPB/api/shop/buy" -H 'Content-Type: application/json' -d "{\"product_id\":1,\"ik\":\"$IK\"}")" = "200" ] \
+    || fail "幂等首购应 200"
   IDEM_ONO="SHOP-$IK"
   curl -s --noproxy '*' "$PPB/api/order?q=$IDEM_ONO" | grep -q "\"order_no\":\"$IDEM_ONO\"" \
     || fail "幂等：应已创建 $IDEM_ONO"
   curl -s --noproxy '*' "$PPB/api/order?q=$IDEM_ONO" | grep -q '"status":"pending"' \
     || fail "幂等：首单应 pending"
   # 刷新 / 重复点击（同一 ik）-> 复用同一笔，不产生新行
-  [ "$(code "$PPB/shop/buy/1?ik=$IK")" = "200" ] || fail "幂等重复点击应 200"
+  [ "$(code -X POST "$PPB/api/shop/buy" -H 'Content-Type: application/json' -d "{\"product_id\":1,\"ik\":\"$IK\"}")" = "200" ] \
+    || fail "幂等重复点击应 200"
   [ "$(total_of "$PPB/api/order?q=$IDEM_ONO")" = "1" ] \
     || fail "幂等：同一 ik 重复下单不应产生新订单行（total 应为 1）"
-  # 支付（PayPal 路径）：收银台建单 -> 跟 approve 302 跳回 return -> 捕获 -> paid
-  IK_PAY_HTML="$(curl -s --noproxy '*' "$PPB/shop/pay/$IDEM_ONO")"
-  IK_APPROVE="$(echo "$IK_PAY_HTML" | grep -oE 'http://[^"]*mock/paypal/approve\?token=[^"]+' | head -1)"
-  [ -n "$IK_APPROVE" ] || fail "幂等：收银台应给出 approve 链接: $(echo "$IK_PAY_HTML" | head -8)"
-  RT_IK="$(curl -s --noproxy '*' -L -o /dev/null -w '%{http_code}' "$IK_APPROVE")"
-  [ "$RT_IK" = "200" ] || fail "幂等：approve 跳转后 return 应 200 (got $RT_IK)"
-  curl -s --noproxy '*' "$PPB/api/order?q=$IDEM_ONO" | grep -q '"status":"paid"' \
-    || fail "幂等：支付后应为 paid"
+  # 支付（PayPal 路径）：收银台 JSON 取 approve_url -> 直接调 return 捕获 -> paid
+  IK_CASH="$(curl -s --noproxy '*' "$PPB/api/shop/cashier/$IDEM_ONO")"
+  IK_APPROVE="$(echo "$IK_CASH" | grep -o '"approve_url":"[^"]*"' | head -1 | sed 's/"approve_url":"//;s/"$//')"
+  [ -n "$IK_APPROVE" ] || fail "幂等：收银台应给出 approve 链接: $IK_CASH"
+  IK_TOKEN="$(echo "$IK_APPROVE" | sed -E 's/.*[?&]token=([^&"]*).*/\1/')"
+  [ -n "$IK_TOKEN" ] || fail "幂等：approve_url 应带 token"
+  RT_IK_RESP="$(curl -s --noproxy '*' "$PPB/api/pay/return?order_no=$IDEM_ONO&token=$IK_TOKEN")"
+  echo "$RT_IK_RESP" | grep -q '"status":"paid"' || fail "幂等：支付后应为 paid: $RT_IK_RESP"
   # 已支付后再次同 ik -> 开新单（重买），订单号带 -r 后缀、状态 pending
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/buy/1?ik=$IK" || fail "幂等已支付后重买请求失败"
+  curl -s --noproxy '*' -o /dev/null -X POST "$PPB/api/shop/buy" -H 'Content-Type: application/json' -d "{\"product_id\":1,\"ik\":\"$IK\"}" \
+    || fail "幂等已支付后重买请求失败"
   REBUY="$(curl -s --noproxy '*' "$PPB/api/order" | grep -oE "SHOP-$IK-r[0-9]+" | head -1)"
   [ -n "$REBUY" ] || fail "幂等：已支付后同 ik 应开新单（SHOP-$IK-r<ts>）"
   curl -s --noproxy '*' "$PPB/api/order?q=$REBUY" | grep -q '"status":"pending"' \
@@ -290,18 +302,18 @@ PY
   # POST /v2/payments/captures/{capture_id}/refund。pending 单（店面新单未 approve）
   # 与未知订单被拒；mock 侧对同一捕获重复退回 422 ALREADY_REFUNDED（应用侧
   # paypal_refund 按成功对账，本地状态守卫为主）。
-  echo "==> 退款阶段（PayPal）：确认页 -> 退款 -> 已退款 -> 重复退幂等 ..."
-  PP_RF_HTML="$(curl -s --noproxy '*' "$PPB/shop/refund/$ONO")"
-  echo "$PP_RF_HTML" | grep -q '申请退款' || fail "PayPal 退款确认页应展示申请退款: $(echo "$PP_RF_HTML" | head -8)"
-  echo "$PP_RF_HTML" | grep -q 'PayPal' || fail "PayPal 退款确认页应带渠道徽标"
-  echo "$PP_RF_HTML" | grep -q '\$149.00' || fail "PayPal 退款确认页应展示订单金额"
+  echo "==> 退款阶段（PayPal）：确认数据(JSON) -> 退款 -> 已退款 -> 重复退幂等 ..."
+  PP_RF="$(curl -s --noproxy '*' "$PPB/api/shop/refund/$ONO")"
+  echo "$PP_RF" | grep -q '"status":"paid"' || fail "PayPal 退款确认数据应为 paid: $PP_RF"
+  echo "$PP_RF" | grep -q '"amount_cents":14900' || fail "PayPal 退款确认数据应含订单金额"
+  echo "$PP_RF" | grep -q '"currency_symbol":"\$"' || fail "PayPal 退款确认数据应以 \$ 计价"
   # pending 单不可退（幂等段重买的新单此时仍 pending）
-  curl -s --noproxy '*' "$PPB/shop/refund/$REBUY?confirm=1" | grep -q '仅已支付订单可退款' \
-    || fail "pending 订单应拒退"
+  curl -s --noproxy '*' -X POST "$PPB/api/shop/refund/$REBUY" -H 'Content-Type: application/json' -d '{"confirm":"1"}' \
+    | grep -q '仅已支付订单可退款' || fail "pending 订单应拒退"
   # 未知订单
-  curl -s --noproxy '*' "$PPB/shop/refund/NOPE-1?confirm=1" | grep -q '订单不存在' \
+  curl -s --noproxy '*' "$PPB/api/shop/refund/NOPE-1" | grep -q '订单不存在' \
     || fail "未知订单退款应提示不存在"
-  # 订单后台（/order）paid 行动作列应注入「退款」链接（用户诉求：UI 上能找到退款入口）
+  # 订单后台（/order SSR 仍在）paid 行动作列应注入「退款」链接（用户诉求：UI 上能找到退款入口）
   curl -s --noproxy '*' "$PPB/order" | grep -q "/shop/refund/$ONO" \
     || fail "订单后台 paid 行应带退款链接"
   # 展示格式化：美元计价 + paid 绿徽标（PayPal 变体 cur=$）
@@ -322,15 +334,17 @@ con = sqlite3.connect(sys.argv[1])
 con.execute('UPDATE "order" SET "capture_id" = NULL WHERE "order_no" = ?', (sys.argv[2],))
 con.commit(); con.close()
 PY
-  # 确认退款（mock 受理；capture_id 走反查兜底）
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/$ONO?confirm=1" || fail "PayPal 退款请求失败"
+  # 确认退款（POST JSON；mock 受理；capture_id 走反查兜底）
+  curl -s --noproxy '*' -o /dev/null -X POST "$PPB/api/shop/refund/$ONO" -H 'Content-Type: application/json' -d '{"confirm":"1"}' \
+    || fail "PayPal 退款请求失败"
   curl -s --noproxy '*' "$PPB/api/order?q=$ONO" | grep -q '"status":"refunded"' \
     || fail "退款后订单应落库 refunded"
-  curl -s --noproxy '*' "$PPB/shop/result/$ONO" | grep -q '已退款' || fail "结果页应展示已退款"
-  # 重复退（幂等）：本地状态守卫，仍展示已退款
-  curl -s --noproxy '*' "$PPB/shop/refund/$ONO?confirm=1" | grep -q '已退款' \
-    || fail "重复退应幂等展示已退款"
-  # 已退款行不应再显示退款链接（条件渲染只认 paid）
+  curl -s --noproxy '*' "$PPB/api/shop/result/$ONO" | grep -q '"status":"refunded"' \
+    || fail "结果页应展示已退款"
+  # 重复退（幂等）：本地状态守卫，仍返回已退款
+  curl -s --noproxy '*' -X POST "$PPB/api/shop/refund/$ONO" -H 'Content-Type: application/json' -d '{"confirm":"1"}' \
+    | grep -q '"status":"refunded"' || fail "重复退应幂等返回已退款"
+  # 已退款行不应再显示退款链接（SSR 条件渲染只认 paid）
   curl -s --noproxy '*' "$PPB/order" | grep -q "/shop/refund/$ONO" \
     && fail "refunded 行不应再带退款链接" || true
   # mock 侧直探：查单兜底（GET order 返回 captures）+ 同一捕获重复退 422
@@ -394,20 +408,13 @@ con.execute('INSERT INTO "order" ("order_no","amount_cents","status") VALUES (?,
 con.execute('INSERT INTO "order" ("order_no","amount_cents","status") VALUES (?,?,?)', ("EARLY-MANUAL", 7700, "paid"))
 con.commit(); con.close()
 PY
-  # 确认页应提示缺关联 ID 并给出恢复入口（此前双空会直接报错死）
-  EO_RF="$(curl -s --noproxy '*' "$PPB/shop/refund/EARLY-DIRECT")"
-  echo "$EO_RF" | grep -q '缺少 PayPal 关联 ID（早期订单）' \
-    || fail "双空早期订单确认页应提示缺关联 ID"
-  echo "$EO_RF" | grep -q '/shop/recover/EARLY-DIRECT' \
-    || fail "双空早期订单确认页应给出恢复入口"
-  # 恢复路由应渲染表单（顶级路由，非嵌于退款函数体内）
-  EO_RCV="$(curl -s --noproxy '*' "$PPB/shop/recover/EARLY-DIRECT")"
-  echo "$EO_RCV" | grep -q '恢复 PayPal 关联 ID' \
-    || fail "恢复路由应渲染表单"
-  echo "$EO_RCV" | grep -q 'name="capid"' \
-    || fail "恢复表单应含捕获 ID 输入框"
-  # 路径1：填捕获 ID 直达退款（真实 PayPal refund 走 mock，EARLY-DIRECT）
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/EARLY-DIRECT?confirm=1&capid=$EO_A_CAP" \
+  # 确认数据应提示缺关联 ID（need_recover=1；恢复页由 SPA hash 路由渲染，后端不再出 SSR 表单）
+  EO_RF="$(curl -s --noproxy '*' "$PPB/api/shop/refund/EARLY-DIRECT")"
+  echo "$EO_RF" | grep -q '"need_recover":1' \
+    || fail "双空早期订单确认数据应提示缺关联 ID（need_recover=1）: $EO_RF"
+  # 路径1：填捕获 ID 直达退款（POST JSON；真实 PayPal refund 走 mock，EARLY-DIRECT）
+  curl -s --noproxy '*' -o /dev/null -X POST "$PPB/api/shop/refund/EARLY-DIRECT" \
+    -H 'Content-Type: application/json' -d "{\"confirm\":\"1\",\"capid\":\"$EO_A_CAP\"}" \
     || fail "早期订单 capid 退款请求失败"
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-DIRECT" | grep -q '"status":"refunded"' \
     || fail "早期订单 capid 直达退款后应落库 refunded"
@@ -415,23 +422,26 @@ PY
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-DIRECT" | grep -q "\"capture_id\":\"$EO_A_CAP\"" \
     || fail "早期订单退款应回补 capture_id"
   # 路径2：填 PayPal 订单号反查捕获再退款（EARLY-PPID）
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/EARLY-PPID?confirm=1&ppid=$EO_B_OID" \
+  curl -s --noproxy '*' -o /dev/null -X POST "$PPB/api/shop/refund/EARLY-PPID" \
+    -H 'Content-Type: application/json' -d "{\"confirm\":\"1\",\"ppid\":\"$EO_B_OID\"}" \
     || fail "早期订单 ppid 反查退款请求失败"
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-PPID" | grep -q '"status":"refunded"' \
     || fail "早期订单 ppid 反查退款后应落库 refunded"
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-PPID" | grep -q "\"paypal_order_id\":\"$EO_B_OID\"" \
     || fail "早期订单 ppid 反查退款应回补 paypal_order_id"
   # 路径3：已在 PayPal 后台手动退款 -> 本地标记（不调 API，EARLY-MANUAL）
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/EARLY-MANUAL?confirm=1&manual=1" \
+  curl -s --noproxy '*' -o /dev/null -X POST "$PPB/api/shop/refund/EARLY-MANUAL" \
+    -H 'Content-Type: application/json' -d '{"confirm":"1","manual":"1"}' \
     || fail "早期订单手动标记退款请求失败"
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-MANUAL" | grep -q '"status":"refunded"' \
     || fail "早期订单手动标记后应落库 refunded"
-  curl -s --noproxy '*' "$PPB/shop/refund/EARLY-MANUAL" | grep -q '已退款' \
-    || fail "早期订单手动标记结果页应展示已退款"
+  curl -s --noproxy '*' "$PPB/api/shop/result/EARLY-MANUAL" | grep -q '"status":"refunded"' \
+    || fail "早期订单手动标记结果数据应展示已退款"
   # 路径4：把「交易号/捕获 ID」填进订单号框——订单 GET 404 后自动改查捕获接口
   # （真实事故：早期订单恢复时用户把交易号填进订单号框，订单端点回
   # RESOURCE_NOT_FOUND/INVALID_RESOURCE_ID 直接报错；兜底后反解订单号并退款）
-  curl -s --noproxy '*' -o /dev/null "$PPB/shop/refund/EARLY-TXNID?confirm=1&ppid=$EO_C_CAP" \
+  curl -s --noproxy '*' -o /dev/null -X POST "$PPB/api/shop/refund/EARLY-TXNID" \
+    -H 'Content-Type: application/json' -d "{\"confirm\":\"1\",\"ppid\":\"$EO_C_CAP\"}" \
     || fail "早期订单 交易号兜底退款请求失败"
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-TXNID" | grep -q '"status":"refunded"' \
     || fail "交易号兜底退款后应落库 refunded"
@@ -439,27 +449,25 @@ PY
     || fail "交易号兜底应回填真实订单号（related_ids.order_id）"
   curl -s --noproxy '*' "$PPB/api/order?q=EARLY-TXNID" | grep -q "\"capture_id\":\"$EO_C_CAP\"" \
     || fail "交易号兜底应回填捕获 ID"
-  echo "ok   早期订单（双空关联 ID）：need_recover 提示 -> 恢复表单 -> capid 直达 / ppid 反查 / manual 本地标记 / 交易号捕获兜底 四条路径均落库 refunded"
+  echo "ok   早期订单（双空关联 ID）：need_recover 提示 -> capid 直达 / ppid 反查 / manual 本地标记 / 交易号捕获兜底 四条路径均落库 refunded"
 
   # ---- 商品目录：空表自动播种 -> 清空不复活 -> 手动重载（用户诉求：给示例 + 清空按钮）----
-  # 新库首访 /shop 已自动播种（上方 PP_SHOP 断言即依赖该行为）；本段验证清空/重载闭环。
+  # 新库首访 /api/shop/products 已自动播种（上方 PP_PROD 断言即依赖该行为）；
+  # 本段验证清空/重载闭环（JSON 端点，SPA 前端调同一接口）。
   # 放在所有依赖商品行的探针之后：clear 会删光商品，提前会破坏后续 buy/退款断言。
-  # 实现细节：清空/重载并回 /shop?act=（lume-core 路由表上限 32，禁单独占路由位）；
-  # 清空落「已播种」标记（_nsgm_shop_meta 元表）——否则空表会被下一次访问自动播种，
-  # 按钮形同虚设；sql_write 护栏禁无 WHERE 的 DELETE，按 id 逐行参数化删。
-  curl -s --noproxy '*' "$PPB/shop?act=clear" | grep -q '已清空全部商品' \
-    || fail "shop?act=clear 应提示已清空"
+  # 实现细节：清空落「已播种」标记（_nsgm_shop_meta 元表）——否则空表会被下一次
+  # 访问自动播种，按钮形同虚设；sql_write 护栏禁无 WHERE 的 DELETE，按 id 逐行参数化删。
+  curl -s --noproxy '*' "$PPB/api/shop/products?act=clear" | grep -q '已清空全部商品' \
+    || fail "products?act=clear 应提示已清空"
   [ "$(curl -s --noproxy '*' "$PPB/api/product" | grep -o '"total":[0-9]*' | head -1 | grep -o '[0-9]*')" = "0" ] \
     || fail "clear 后商品应清零"
-  curl -s --noproxy '*' "$PPB/shop" | grep -q '商品目录为空' \
-    || fail "clear 后再访问 /shop 应为空态（不自动复活）"
-  curl -s --noproxy '*' "$PPB/shop" | grep -q '载入示例商品' \
-    || fail "空态应给出载入示例商品入口"
-  curl -s --noproxy '*' "$PPB/shop?act=seed" | grep -q '示例商品已载入' \
-    || fail "shop?act=seed 应重载示例商品"
-  curl -s --noproxy '*' "$PPB/shop" | grep -q '\$399.00' \
+  curl -s --noproxy '*' "$PPB/api/shop/products" | grep -q '"empty":1' \
+    || fail "clear 后再访问 products 应为空态（不自动复活）"
+  curl -s --noproxy '*' "$PPB/api/shop/products?act=seed" | grep -q '示例商品已载入' \
+    || fail "products?act=seed 应重载示例商品"
+  curl -s --noproxy '*' "$PPB/api/shop/products" | grep -q '"price_cents":39900' \
     || fail "seed 后店面应恢复示例商品"
-  curl -s --noproxy '*' "$PPB/shop?act=seed" | grep -q '商品目录非空，未重复载入' \
+  curl -s --noproxy '*' "$PPB/api/shop/products?act=seed" | grep -q '商品目录非空，未重复载入' \
     || fail "非空时 act=seed 不应重复载入"
   # 订单不受清空影响（早前探针建的单仍在）
   curl -s --noproxy '*' "$PPB/api/order" | grep -q '"total":[1-9]' \
@@ -469,5 +477,5 @@ else
   echo "SKIP 支付阶段(PayPal): 无 python3"
 fi
 
-echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / NULL 归一 / PayPal 全链路 / 退款全链路 / 订单后台退款入口 / 库存扣减与售罄拒单 / 商品快照 / 退款回补 / 收银台复用防孤儿单 / ik 幂等 / 早期订单双空关联 ID 恢复 / 交易号捕获兜底 / 商品目录示例播种与清空重载)"
+echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / NULL 归一 / PayPal 全链路(JSON) / 退款全链路(JSON) / 订单后台退款入口 / 库存扣减与售罄拒单 / 商品快照 / 退款回补 / 收银台复用防孤儿单 / ik 幂等 / 早期订单双空关联 ID 恢复 / 交易号捕获兜底 / 商品目录示例播种与清空重载)"
 exit 0

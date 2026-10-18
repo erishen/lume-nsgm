@@ -49,8 +49,11 @@ export func gen_page_tsx(ctrl: string, fs, n: int): string {
   return tpl.render(tpl_text, ctx);
 }
 
-// 应用壳：web/src/App.tsx（hash 路由 + 模块导航，NAV 由模块清单注入）
-export func gen_app_tsx(mods): string {
+// 应用壳：web/src/App.tsx（hash 路由 + 模块导航 + 店面/支付嵌套路由）
+// NAV 由模块清单注入；hasShop（config.shop 与 pay 同时非 null）时追加商城导航与
+// #/shop、#/shop/pay/:ono、#/shop/result/:ono、#/shop/refund/:ono、#/shop/recover/:ono、
+// #/pay/return、#/pay/cancel 路由（PayPal 回跳走 hash 路由，后端无需 fallback）。
+export func gen_app_tsx(mods, hasShop): string {
   let imports = "";
   let tabs = "";
   let nav_links = "";
@@ -68,11 +71,32 @@ export func gen_app_tsx(mods): string {
     }
     i = i + 1;
   }
-  let s = "// src/App.tsx — 应用壳（lume-nsgm 生成：hash 路由 + 模块导航，勿手改）\n";
+  if (hasShop) {
+    imports = imports
+      + "import ShopPage from \"./pages/ShopPage\";\n"
+      + "import CashierPage from \"./pages/CashierPage\";\n"
+      + "import ResultPage from \"./pages/ResultPage\";\n"
+      + "import RefundPage from \"./pages/RefundPage\";\n"
+      + "import RecoverPage from \"./pages/RecoverPage\";\n"
+      + "import PayReturnPage from \"./pages/PayReturnPage\";\n";
+    nav_links = nav_links + "          <a key=\"shop\" className={cur.startsWith(\"shop\") || cur.startsWith(\"pay/\") ? \"active\" : \"\"} href=\"#/shop\">{\"商城\"}</a>\n";
+    home_items = home_items + "            <li key=\"shop\"><a href=\"#/shop\">{\"商城\"}</a></li>\n";
+  }
+  let shopRoutesConst = "";
+  if (hasShop) {
+    shopRoutesConst = "const SHOP_ROUTES: { prefix: string; comp: (p: { ono: string }) => JSX.Element }[] = [\n"
+      + "  { prefix: \"shop/pay/\", comp: CashierPage },\n"
+      + "  { prefix: \"shop/result/\", comp: ResultPage },\n"
+      + "  { prefix: \"shop/refund/\", comp: RefundPage },\n"
+      + "  { prefix: \"shop/recover/\", comp: RecoverPage },\n"
+      + "];\n\n";
+  }
+  let s = "// src/App.tsx — 应用壳（lume-nsgm 生成：hash 路由 + 模块导航 + 店面/支付路由，勿手改）\n";
   s = s + "import { useEffect, useState } from \"react\";\n";
   s = s + imports;
   s = s + "\ntype Tab = { name: string; label: string; comp: () => JSX.Element };\n\n";
   s = s + "const TABS: Tab[] = [\n" + tabs + "];\n\n";
+  s = s + shopRoutesConst;
   s = s + "export default function App() {\n";
   s = s + "  const [route, setRoute] = useState(window.location.hash || \"#/home\");\n";
   s = s + "  useEffect(() => {\n";
@@ -82,6 +106,34 @@ export func gen_app_tsx(mods): string {
   s = s + "  }, []);\n";
   s = s + "  const cur = route.replace(/^#\\/?/, \"\").split(\"?\")[0];\n";
   s = s + "  const active = TABS.find((t) => t.name === cur);\n";
+  if (hasShop) {
+    s = s + "  const shopMatch = SHOP_ROUTES.find((r) => cur.startsWith(r.prefix));\n";
+  }
+  s = s + "  let body;\n";
+  s = s + "  if (active) {\n";
+  s = s + "    body = <active.comp />;\n";
+  s = s + "  }";
+  if (hasShop) {
+    s = s + " else if (cur === \"shop\") {\n";
+    s = s + "    body = <ShopPage />;\n";
+    s = s + "  } else if (shopMatch) {\n";
+    s = s + "    const ono = decodeURIComponent(cur.slice(shopMatch.prefix.length));\n";
+    s = s + "    const Comp = shopMatch.comp;\n";
+    s = s + "    body = <Comp ono={ono} />;\n";
+    s = s + "  } else if (cur === \"pay/return\" || cur === \"pay/cancel\") {\n";
+    s = s + "    body = <PayReturnPage mode={cur === \"pay/return\" ? \"return\" : \"cancel\"} />;\n";
+    s = s + "  }";
+  }
+  s = s + " else {\n";
+  s = s + "    body = (\n";
+  s = s + "      <div>\n";
+  s = s + "        <h1>lume-nsgm 生成的项目</h1>\n";
+  s = s + "        <ul>\n";
+  s = s + home_items;
+  s = s + "        </ul>\n";
+  s = s + "      </div>\n";
+  s = s + "    );\n";
+  s = s + "  }\n";
   s = s + "  return (\n";
   s = s + "    <div>\n";
   s = s + "      <header className=\"nav\">\n";
@@ -89,16 +141,7 @@ export func gen_app_tsx(mods): string {
   s = s + nav_links;
   s = s + "      </header>\n";
   s = s + "      <main className=\"container\">\n";
-  s = s + "        {active ? (\n";
-  s = s + "          <active.comp />\n";
-  s = s + "        ) : (\n";
-  s = s + "          <div>\n";
-  s = s + "            <h1>lume-nsgm 生成的项目</h1>\n";
-  s = s + "            <ul>\n";
-  s = s + home_items;
-  s = s + "            </ul>\n";
-  s = s + "          </div>\n";
-  s = s + "        )}\n";
+  s = s + "        {body}\n";
   s = s + "      </main>\n";
   s = s + "    </div>\n";
   s = s + "  );\n";
@@ -107,8 +150,8 @@ export func gen_app_tsx(mods): string {
 }
 
 // 生成整个 web/：静态基座复制 + ui.css（复用 app.css 并追加 SPA 扩展）
-// + 每模块页面 + App.tsx
-export func gen_web(out: string, mods): int {
+// + 每模块页面 + （hasShop 时）店面/支付页面 + App.tsx
+export func gen_web(out: string, mods, shop, pay): int {
   mkdir(out + "/web/src/pages");
 
   // 静态基座（scaffold/web/ -> out/web/）
@@ -144,6 +187,26 @@ export func gen_web(out: string, mods): int {
     write_file(out + "/web/src/ui.css", css + extra);
   }
 
+  let hasShop = (shop != null && pay != null);
+
+  // 店面/支付静态页面（仅在 hasShop 时复制进产物；未配置 shop 则不引入）
+  if (hasShop) {
+    let shopPages = [
+      "ShopPage.tsx", "CashierPage.tsx", "ResultPage.tsx",
+      "RefundPage.tsx", "RecoverPage.tsx", "PayReturnPage.tsx"
+    ];
+    let j = 0;
+    while (j < len(shopPages)) {
+      let content = read_file("scaffold/web/src/pages/" + shopPages[j]);
+      if (content != null) {
+        write_file(out + "/web/src/pages/" + shopPages[j], content);
+      } else {
+        print("WARN: scaffold/web/src/pages/" + shopPages[j] + " missing");
+      }
+      j = j + 1;
+    }
+  }
+
   // 每模块页面
   i = 0;
   while (i < len(mods)) {
@@ -159,6 +222,6 @@ export func gen_web(out: string, mods): int {
   }
 
   // App.tsx
-  write_file(out + "/web/src/App.tsx", gen_app_tsx(mods));
+  write_file(out + "/web/src/App.tsx", gen_app_tsx(mods, hasShop));
   return 0;
 }

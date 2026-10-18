@@ -13,7 +13,8 @@ let fs = [
 ];
 
 let page = rg.gen_page_tsx("user", fs, len(fs));
-let app = rg.gen_app_tsx([{ "name": "user", "label": "用户" }, { "name": "order", "label": "订单" }]);
+let app = rg.gen_app_tsx([{ "name": "user", "label": "用户" }, { "name": "order", "label": "订单" }], 0);
+let app_shop = rg.gen_app_tsx([{ "name": "user", "label": "用户" }], 1);
 
 let fails = 0;
 
@@ -43,6 +44,20 @@ fails = fails + a.assert_contains(app, "import OrderPage from \"./pages/OrderPag
 fails = fails + a.assert_contains(app, "{ name: \"user\", label: \"用户\", comp: UserPage }", "t5: TABS entry with label");
 fails = fails + a.assert_contains(app, "window.addEventListener(\"hashchange\", onHash)", "t5: hash routing wired");
 fails = fails + a.assert_contains(app, "<active.comp />", "t5: active tab rendered");
+
+// hasShop=0：不得注入店面/支付路由（ShopPage 等未被 import，纯 CRUD 变体可编译）
+fails = fails + a.assert_not_contains(app, "SHOP_ROUTES", "t5: no shop routes without shop config");
+fails = fails + a.assert_not_contains(app, "ShopPage", "t5: no ShopPage import without shop config");
+fails = fails + a.assert_not_contains(app, "PayReturnPage", "t5: no PayReturnPage without shop config");
+
+// hasShop=1：店面/支付 hash 路由注入（#:shop 列表 + 参数路由 + PayPal 回跳）
+fails = fails + a.assert_contains(app_shop, "import ShopPage from \"./pages/ShopPage\"", "t5: shop App imports ShopPage");
+fails = fails + a.assert_contains(app_shop, "const SHOP_ROUTES", "t5: shop routes table emitted");
+fails = fails + a.assert_contains(app_shop, "{ prefix: \"shop/pay/\", comp: CashierPage }", "t5: cashier param route");
+fails = fails + a.assert_contains(app_shop, "{ prefix: \"shop/refund/\", comp: RefundPage }", "t5: refund param route");
+fails = fails + a.assert_contains(app_shop, "cur === \"pay/return\" || cur === \"pay/cancel\"", "t5: PayPal hash return/cancel routes");
+fails = fails + a.assert_contains(app_shop, "body = <PayReturnPage mode=", "t5: PayPal return page rendered");
+fails = fails + a.assert_contains(app_shop, "href=\"#/shop\"", "t5: shop nav link emitted");
 
 func main(): int {
   if (fails == 0) { print("ALL PASS (t5: reactgen)"); }

@@ -7,3 +7,4 @@ __pycache__/
 # 含本机绝对路径（lume-core 二进制位置），禁止提交，避免泄漏本地路径并破坏他人环境
 .env
 .env.local
+get-test/
