@@ -248,20 +248,40 @@ post "/api/shop/refund/:ono", func(req) {
   // ——订单 GET 对捕获 ID 回 404，改查捕获接口（related_ids.order_id 反解真实订单号）。
   if (cap_id == "" && ppid != "") {
     let tk0 = pay.paypal_token(PAYPAL_CFG);
-    if (get(tk0, "ok", false) != true) { return { "ok": false, "err": "paypal_token_failed", "detail": str(get(tk0, "err", "")) }; }
+    if (get(tk0, "ok", false) != true) { return { "ok": false, "err": "paypal_token_failed", "msg": "PayPal 授权失败：" + str(get(tk0, "err", "")) }; }
     let tok0 = str(get(tk0, "token", ""));
+    let go_err = "";
+    let gc_err = "";
     let go = pay.paypal_get_order(PAYPAL_CFG, tok0, ppid);
     if (get(go, "ok", false) != true) {
+      go_err = str(get(go, "err", ""));
       let gc = pay.paypal_get_capture(PAYPAL_CFG, tok0, ppid);
       if (get(gc, "ok", false) == true) {
         cap_id = str(get(gc, "capture_id", ""));
         let rppid = str(get(gc, "order_id", ""));
         if (rppid != "") { ppid = rppid; }
+      } else {
+        gc_err = str(get(gc, "err", ""));
       }
     } else {
       cap_id = str(get(go, "capture_id", ""));
+      // 订单存在但未捕获（APPROVED，无 captures）：款项未扣、无捕获记录、无款可退
+      // —— 单独明示，不混入笼统的「无法反查捕获记录」（2026-10-18 真实订单
+      // 实证：return 链路中断的旧单停在 APPROVED；单号勿入注释，见 check-privacy）。
+      if (cap_id == "") {
+        let gst = str(get(go, "order_status", ""));
+        if (gst == "APPROVED") {
+          return { "ok": false, "err": "not_captured",
+                   "msg": "该 PayPal 订单已批准但未完成扣款（未捕获），没有款项可退。确认 PayPal 后台无此笔扣款后，可勾选「仅本地标记」关闭本单。" };
+        }
+        return { "ok": false, "err": "no_capture_on_order",
+                 "msg": "PayPal 订单状态为 " + gst + "，没有可退的捕获记录（order=" + ppid + "）" };
+      }
     }
-    if (cap_id == "") { return { "ok": false, "err": "capture_not_found", "msg": "无法从 PayPal 反查捕获记录" }; }
+    if (cap_id == "") {
+      return { "ok": false, "err": "capture_not_found",
+               "msg": "无法从 PayPal 反查捕获记录（订单查询: " + go_err + "；捕获查询: " + gc_err + "）" };
+    }
   }
   if (cap_id == "") { return { "ok": false, "err": "need_recover", "msg": "仍未定位到捕获记录，请到恢复页填入关联 ID" }; }
   let tk = pay.paypal_token(PAYPAL_CFG);

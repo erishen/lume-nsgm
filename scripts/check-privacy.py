@@ -34,6 +34,7 @@ NEEDLES = [
     (re.compile(rb'\bAKIA[0-9A-Z]{16}'), 'AWS Access Key'),
     (re.compile(rb'PRIVATE KEY'), 'PEM 私钥头'),
     (re.compile(rb'\b[0-9A-Z]{17}\b'), '真实交易 ID 形态（PayPal 订单号/捕获 ID 形状）'),
+    (re.compile(rb'SHOP-1-[0-9]{6,}'), '真实店面订单号形态（本机实例生成，公开仓只允许虚构示例）'),
 ]
 
 # 行级例外（正则, 理由）。只放「审过的、有意为之的」。
