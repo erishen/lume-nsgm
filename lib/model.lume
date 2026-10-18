@@ -9,6 +9,22 @@ export func cap(s: string): string {
   return upper(substr(s, 0, 1)) + substr(s, 1);
 }
 
+// ---- CLI 覆盖参数（key=value 形状；main.lume cmd_config 用，tests/t8 锁语义）----
+
+// 取 args[idx] 中 "key=value" 的 value；不匹配、空值一律返回 ""
+// （调用方据此回落配置/默认值或报错）。前缀含等号，天然不会互误中
+// （layout= 不中 out=，dbout= 不中 out=）。注意不能用 --key=value：
+// lume-core 的 CLI 会拦下所有 dash 参数打印它自己的 usage，脚本
+// argv() 根本收不到（2026-10-18 实证）。
+export func flag_val(args, idx: int, key: string): string {
+  let a = get(args, idx, "");
+  let pfx = key + "=";
+  if (len(a) > len(pfx) && substr(a, 0, len(pfx)) == pfx) {
+    return substr(a, len(pfx));
+  }
+  return "";
+}
+
 // ---- 字段属性读取（JSON map，带默认值）----
 
 export func fname(f): string { return get(f, "name", ""); }

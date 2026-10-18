@@ -1,0 +1,41 @@
+// tests/t8.lume — CLI 覆盖参数回归（model.flag_val + main.lume out=/db= 语义）
+//
+// 背景：配置文件模式原先只认 JSON 里的 out/db，e2e 等场景必须改写配置副本。
+// main.lume 的 cmd_config 现支持 out=dir / db=name 覆盖（空值回落配置值，
+// 含 = 的未知 key fail-loud）。此处锁纯函数 flag_val 的解析语义；main.lume 侧
+// 的真实生成路径由 scripts/e2e.sh 覆盖（out=./gen-paypal），双层防回归。
+// main() 返回失败计数 = 进程退出码，make test 据此捕获回归。
+
+import "../lib/model.lume" as m;
+import "../lib/assert.lume" as a;
+
+func main() {
+  let f = 0;
+
+  // A) 正常取值：out=dir / db=name（无 dash 前缀，lume-core CLI 会吞掉 -- 参数）
+  f = f + a.assert_true(m.flag_val(["out=./gen-x"], 0, "out") == "./gen-x", "flag_val 取 out 值");
+  f = f + a.assert_true(m.flag_val(["db=shop_db"], 0, "db") == "shop_db", "flag_val 取 db 值");
+  // 多参数场景：目标在非零下标
+  f = f + a.assert_true(m.flag_val(["cfg.json", "out=./gen-y"], 1, "out") == "./gen-y", "flag_val 非零下标取值");
+
+  // B) 空值/不匹配一律返回 ""（调用方据此回落配置值）
+  f = f + a.assert_true(m.flag_val(["out="], 0, "out") == "", "空值 out= 返回空串");
+  f = f + a.assert_true(m.flag_val(["outx=./gen"], 0, "out") == "", "键不匹配返回空串");
+  f = f + a.assert_true(m.flag_val(["-o"], 0, "out") == "", "单杠不匹配");
+  f = f + a.assert_true(m.flag_val(["example-config.json"], 0, "out") == "", "位置参数不匹配");
+  f = f + a.assert_true(m.flag_val([], 5, "out") == "", "越界下标返回空串");
+  f = f + a.assert_true(m.flag_val(["out=./gen-x"], 0, "db") == "", "键不匹配返回空串");
+
+  // C) 前缀严格等长匹配，互不误中（dbout= 不得命中 out=）
+  f = f + a.assert_true(m.flag_val(["dbout=./gen"], 0, "out") == "", "dbout= 不误中 out= 前缀");
+  f = f + a.assert_true(m.flag_val(["out2=./gen"], 0, "out") == "", "out2= 不误中 out= 前缀");
+  f = f + a.assert_true(m.flag_val(["out=a=b"], 0, "out") == "a=b", "值内含等号原样取");
+
+  if (f == 0) {
+    print("ALL PASS (CLI override flag_val: " + "取值/空值/前缀边界 checked)");
+  } else {
+    print(str(f) + " ASSERTION(S) FAILED");
+  }
+  return f;
+}
+main();

@@ -156,6 +156,11 @@ make run
 #  详见「支付」「店面」两节）
 make run-paypal
 
+# run / run-paypal 均支持 OUT= 覆盖输出目录，两个变体不再互相覆盖（也不碰本地 ./gen）：
+#   make run-paypal OUT=/tmp/nsgm-paypal
+# 任意配置文件也支持在命令行用 out=/db= 覆盖（不带 -- 前缀：lume-core 会吞掉 dash 参数）：
+#   lume-core main.lume example-config.json out=/tmp/x db=my_db
+
 # 单模块：命令行模板字段
 make create MODULE=product
 

@@ -158,6 +158,12 @@ make run
 #  the later run wins; see the Payment and Storefront sections)
 make run-paypal
 
+# Both run / run-paypal accept OUT= to override the output directory, so the two
+# variants no longer clobber each other (or your local ./gen):
+#   make run-paypal OUT=/tmp/nsgm-paypal
+# Any config file also accepts out=/db= overrides on the CLI (no -- prefix: lume-core
+# swallows dash args):  lume-core main.lume example-config.json out=/tmp/x db=my_db
+
 # Single module: template fields from the command line
 make create MODULE=product
 

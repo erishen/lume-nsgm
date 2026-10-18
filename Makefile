@@ -6,6 +6,8 @@ LUME := $(or $(LUME_CORE_BIN),lume-core)
 # docroot 静态与 :name 动态路由，单二进制即可跑生成物）；.env 可配 LUME_BIN / LUME_CORE_BIN 覆盖
 LUME_RUN := $(or $(LUME_BIN),$(LUME_CORE_BIN),lume-core)
 TARGET = main.lume
+# 生成输出目录（run / run-paypal 透传 out=$(OUT)；可 make run-paypal OUT=/tmp/x 指定）
+OUT ?= ./gen
 
 .PHONY: run run-paypal base dev create init check check-privacy test serve web-install clean \
         docker-build docker-up docker-down docker-logs docker-ps docker-clean \
@@ -21,16 +23,19 @@ DOCKER_NAME  ?= lume-nsgm-paypal
 GEN_STAMP := $(wildcard gen/app.lume)
 STALE := $(if $(GEN_STAMP),$(shell find main.lume example-config.json lib scaffold templates -type f -newer $(GEN_STAMP) ! -name '*.md' 2>/dev/null | head -1),yes)
 
+# 通用 CRUD 变体：读 example-config.json 生成工程到 ./gen（OUT= 可覆盖输出目录）。
+# 生成后自动装 web 依赖；用 make serve 起服务，或 cd $(OUT) && lume-core app.lume。
 run:
-	$(LUME) $(TARGET) example-config.json
+	$(LUME) $(TARGET) example-config.json out=$(OUT)
 	@$(MAKE) --no-print-directory web-install
 
 # 电商支付变体：product/order 两模块 + shop 店面 + PayPal 支付闭环（配置即
 # example-paypal.json，敏感项 secret_env 指向 PAYPAL_KEY 走 env 注入）。
-# 注意与 run 共用 ./gen 输出目录——后跑者覆盖；生成后用 make serve 起服务，
-# 或 cd gen && lume-core app.lume（支付 env 见 README「支付」节）。
+# 默认输出到 ./gen（与 run 共用，后跑者覆盖）；用 OUT=/path 指定独立目录：
+#   make run-paypal OUT=/tmp/nsgm-paypal
+# 生成后用 make serve 起服务，或 cd $(OUT) && lume-core app.lume（支付 env 见 README「支付」节）。
 run-paypal:
-	$(LUME) $(TARGET) example-paypal.json
+	$(LUME) $(TARGET) example-paypal.json out=$(OUT)
 	@$(MAKE) --no-print-directory web-install
 
 # run 的别名：产物为以 lume 为底的可运行工程（app.lume + modules + SQLite）
@@ -45,27 +50,27 @@ else
 	@echo "==> 产物缺失或源有更新，先重新生成..."
 	@$(MAKE) --no-print-directory run
 endif
-	cd gen && $(LUME_RUN) app.lume
+	cd $(OUT) && $(LUME_RUN) app.lume
 
-# gen/web 依赖安装（run 生成后自动触发，也可单独调用）：
+# $(OUT)/web 依赖安装（run 生成后自动触发，也可单独调用）：
 # - 幂等：node_modules/.pnpm 比 package.json 新（或同刻）则跳过；
 # - pnpm 缺失时降级为 corepack pnpm；都没有则提示手动，不报错——
 #   依赖安装失败不影响已生成的工程本体。
 web-install:
-	@if [ ! -d gen/web ]; then exit 0; fi; \
-	if [ gen/web/node_modules/.pnpm -nt gen/web/package.json ] 2>/dev/null; then \
-	  echo "==> gen/web 依赖已就绪，跳过 pnpm install"; exit 0; fi; \
+	@if [ ! -d $(OUT)/web ]; then exit 0; fi; \
+	if [ $(OUT)/web/node_modules/.pnpm -nt $(OUT)/web/package.json ] 2>/dev/null; then \
+	  echo "==> $(OUT)/web 依赖已就绪，跳过 pnpm install"; exit 0; fi; \
 	if command -v pnpm >/dev/null 2>&1; then PM="pnpm"; \
 	elif command -v corepack >/dev/null 2>&1; then PM="corepack pnpm"; \
-	else echo "==> 未找到 pnpm/corepack，请手动安装: cd gen/web && pnpm install"; exit 0; fi; \
-	echo "==> gen/web 依赖安装 ($$PM)..."; \
-	(cd gen/web && $$PM install --silent) \
-	  && echo "==> gen/web 依赖就绪" \
-	  || echo "==> pnpm install 失败（不影响生成物），可稍后手动: cd gen/web && pnpm install"
+	else echo "==> 未找到 pnpm/corepack，请手动安装: cd $(OUT)/web && pnpm install"; exit 0; fi; \
+	echo "==> $(OUT)/web 依赖安装 ($$PM)..."; \
+	(cd $(OUT)/web && $$PM install --silent) \
+	  && echo "==> $(OUT)/web 依赖就绪" \
+	  || echo "==> pnpm install 失败（不影响生成物），可稍后手动: cd $(OUT)/web && pnpm install"
 
 # 用 lume-core 运行生成项目（需先 make run；二进制路径可写 .env 的 LUME_BIN）
 serve:
-	cd gen && $(LUME_RUN) app.lume
+	cd $(OUT) && $(LUME_RUN) app.lume
 
 # 交互式新建模块（生成后需 make dev / make run 重新产出工程）
 create:
@@ -94,11 +99,12 @@ check-privacy:
 
 # 运行型测试：t3 为模板引擎冒烟；t1/t2/t4/t5 为断言型回归（sql_default、模块生成器
 # 数据层/路由层、React 前端生成器），t6 为 schema 校验回归，t7 为支付接线回归
-# （pay.lume 已知向量 + validate_pay + 字段级 default），各自 main() 返回失败计数即
+# （pay.lume 已知向量 + validate_pay + 字段级 default），t8 为 CLI 覆盖参数回归
+# （out=/db= 的 flag_val 解析语义），各自 main() 返回失败计数即
 # 退出码，断言失败则 make test 非零退出。前置隐私自检（check-privacy）先跑。
 test: check-privacy
 	@fail=0; \
-	for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume tests/t5.lume tests/t6.lume tests/t7.lume; do \
+	for f in tests/t1.lume tests/t2.lume tests/t3.lume tests/t4.lume tests/t5.lume tests/t6.lume tests/t7.lume tests/t8.lume; do \
 		echo "=== running $$f ==="; \
 		if ! $(LUME) $$f; then echo "FAILED: $$f"; fail=1; fi; \
 	done; \

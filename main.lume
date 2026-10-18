@@ -2,7 +2,11 @@
 // 用法：
 //   lume-core main.lume create <module> [db] [out]   — 命令行单模块生成
 //   lume-core main.lume init <module> [db] [out]     — 交互式字段录入后生成（stdin）
-//   lume-core main.lume example-config.json          — 读配置文件批量生成
+//   lume-core main.lume <config.json> [out=dir] [db=name]
+//                                                    — 读配置文件批量生成
+//                                                      （out=/db= 覆盖配置值，值不能为空；
+//                                                          不用 --key=value：lume-core CLI
+//                                                          会拦下 dash 参数）
 // 产物为以 lume 为底的可运行工程（app.lume + modules + lib + www + web React 前端），
 // 用 lume-core（0.7.0+）运行服务端，web/ 用 pnpm dev 联调。
 import "lib/model.lume" as m;
@@ -82,7 +86,9 @@ func cmd_init(args): int {
 
 // 配置文件批量生成：json 数组 modules + db + out
 // 校验失败：一次性列出全部错误（路径精确到 modules[i].fields[j]），exit 1
-func cmd_config(path: string): int {
+// CLI 覆盖：out=dir / db=name（值不能为空；含 = 的未知 key fail-loud；无 dash 前缀）
+func cmd_config(args): int {
+  let path = get(args, 0, "");
   let txt = read_file(path);
   if (txt == "") {
     print("error: cannot read \"" + path + "\" (missing or empty file)");
@@ -111,6 +117,22 @@ func cmd_config(path: string): int {
   let mods = get(cfg, "modules", []);
   let pay = get(cfg, "pay", null);
   let shop = get(cfg, "shop", null);
+  // CLI 覆盖（e2e 等场景免去改写配置文件副本）：out=dir / db=name（无 dash 前缀，
+  // 因为 lume-core CLI 会吞掉所有 -- 参数）。flag_val 空值返回 "" 即回落配置值；
+  // 含 = 但非已知 key（含误写的 --out=）一律 fail-loud，防拼写错误静默失真
+  let fi = 1;
+  while (fi < len(args)) {
+    let a = get(args, fi, "");
+    let fdb = m.flag_val(args, fi, "db");
+    let fout = m.flag_val(args, fi, "out");
+    if (fdb != "") { db = fdb; }
+    else if (fout != "") { out = fout; }
+    else if (contains(a, "=")) {
+      print("error: unknown override \"" + a + "\" (supported: out=dir, db=name)");
+      return 1;
+    }
+    fi = fi + 1;
+  }
   base.base_project(out, mods, pay, shop);
   // 店面存在（pay+shop）时，订单模块列表行注入「退款」链接（与 gen_shop_block 的
   // /shop/refund 路由同条件）；字段名与 shop 块共用 pay.order_no_field/status_field。
@@ -154,12 +176,12 @@ func main(): int {
     return cmd_init(args);
   }
   if (cmd != "") {
-    return cmd_config(cmd);
+    return cmd_config(args);
   }
   print("usage:");
   print("  lume-core main.lume create <module> [db] [out]");
   print("  lume-core main.lume init <module> [db] [out]");
-  print("  lume-core main.lume <config.json>");
+  print("  lume-core main.lume <config.json> [out=dir] [db=name]");
   return 1;
 }
 

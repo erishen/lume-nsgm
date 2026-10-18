@@ -136,7 +136,6 @@ if command -v python3 >/dev/null 2>&1; then
   python3 - "$PP_CLIENT_ID" <<'PY' || { echo "E2E FAIL: 改写 PayPal 配置失败"; exit 1; }
 import json, sys
 cfg = json.load(open('example-paypal.json'))
-cfg['out'] = './gen-paypal'
 cfg['pay']['client_id'] = sys.argv[1]
 cfg['pay']['secret_env'] = 'PAYPAL_KEY'
 cfg['pay']['mode'] = 'sandbox'
@@ -145,7 +144,8 @@ json.dump(cfg, open('/tmp/nsgm-e2e-paypal-config.json', 'w'))
 PY
   rm -rf gen-paypal
   rm -f "$PAYPAL_DB"
-  "$LUME" main.lume /tmp/nsgm-e2e-paypal-config.json >/dev/null 2>&1 \
+  # 输出目录走 CLI 覆盖 out=./gen-paypal（免去改写配置副本），与 make run-paypal 同口径
+  "$LUME" main.lume /tmp/nsgm-e2e-paypal-config.json out=./gen-paypal >/dev/null 2>&1 \
     || { echo "E2E FAIL: example-paypal.json 生成失败"; exit 1; }
   # PayPal mock：独立端口，显式传 client_id/secret（与生成配置一致），避免旧孤儿干扰
   MOCK_PAY_PORT="$PP_MOCK_PORT" \
