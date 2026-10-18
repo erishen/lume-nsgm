@@ -1,10 +1,6 @@
 // src/pages/ShopPage.tsx — 商城商品列表（lume-nsgm 生成：静态页面，路由 #/shop）
 import { useEffect, useState } from "react";
-import { apiShopProducts, apiShopBuy, type ShopItem, type ShopProductsResult } from "../api";
-
-function money(cents: number, sym: string): string {
-  return sym + (cents / 100).toFixed(2);
-}
+import { apiShopProducts, apiShopBuy, money, type ShopItem, type ShopProductsResult } from "../api";
 
 export default function ShopPage() {
   const [data, setData] = useState<ShopProductsResult | null>(null);

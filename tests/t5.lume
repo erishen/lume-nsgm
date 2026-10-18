@@ -67,6 +67,7 @@ fails = fails + a.assert_contains(app, "import OrderPage from \"./pages/OrderPag
 fails = fails + a.assert_contains(app, "{ name: \"user\", label: \"用户\", comp: UserPage }", "t5: TABS entry with label");
 fails = fails + a.assert_contains(app, "window.addEventListener(\"hashchange\", onHash)", "t5: hash routing wired");
 fails = fails + a.assert_contains(app, "<active.comp />", "t5: active tab rendered");
+fails = fails + a.assert_contains(app, "document.title", "t5: document title synced to route");
 
 // hasShop=0：不得注入店面/支付路由（ShopPage 等未被 import，纯 CRUD 变体可编译）
 fails = fails + a.assert_not_contains(app, "SHOP_ROUTES", "t5: no shop routes without shop config");

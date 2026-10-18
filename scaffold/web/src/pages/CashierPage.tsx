@@ -1,10 +1,6 @@
 // src/pages/CashierPage.tsx — 收银台（路由 #/shop/pay/:ono）
 import { useEffect, useState } from "react";
-import { apiShopCashier, type CashierResult } from "../api";
-
-function money(cents: number, sym: string): string {
-  return sym + (cents / 100).toFixed(2);
-}
+import { apiShopCashier, money, type CashierResult } from "../api";
 
 export default function CashierPage({ ono }: { ono: string }) {
   const [data, setData] = useState<CashierResult | null>(null);

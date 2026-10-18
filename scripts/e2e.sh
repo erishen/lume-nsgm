@@ -62,6 +62,19 @@ fail() { echo "E2E FAIL: $1"; exit 1; }
 [ "$(code "$B/app.css")" = "200" ]    || fail "GET /app.css 非 200"
 [ "$(code "$B/api/user")" = "200" ]   || fail "GET /api/user 非 200"
 
+# ---- SPA 壳探针（条件执行）：gen/www/spa 存在才验——Docker 构建期会把
+# web/dist 拷到 www/spa；纯 e2e 环境不构建 SPA，跳过不判失败 ----
+if [ -f "gen/www/spa/index.html" ]; then
+  [ "$(code "$B/spa/")" = "200" ] || fail "GET /spa/ 非 200"
+  curl -s --noproxy '*' "$B/spa/" | grep -q 'id="root"' || fail "SPA 壳缺 root 挂载点"
+  SPA_JS="$(curl -s --noproxy '*' "$B/spa/" | grep -o 'assets/index-[^"]*\.js' | head -1)"
+  [ -n "$SPA_JS" ] || fail "SPA 壳未引用 index js"
+  [ "$(code "$B/spa/$SPA_JS")" = "200" ] || fail "SPA 主 chunk 非 200 ($SPA_JS)"
+  echo "ok   SPA 壳：/spa/ 200 + root 挂载点 + 主 chunk 200"
+else
+  echo "skip SPA 壳探针（gen/www/spa 未构建；Docker 镜像内构建后自动生效）"
+fi
+
 # 创建
 [ "$(code -X POST "$B/api/user" -H 'Content-Type: application/json' -d '{"name":"Alice","email":"alice@example.com"}')" = "200" ] \
   || fail "POST /api/user 非 200"

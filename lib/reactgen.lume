@@ -112,6 +112,9 @@ export func gen_app_tsx(mods, hasShop): string {
   s = s + "  }, []);\n";
   s = s + "  const cur = route.replace(/^#\\/?/, \"\").split(\"?\")[0];\n";
   s = s + "  const active = TABS.find((t) => t.name === cur);\n";
+  s = s + "  useEffect(() => {\n";
+  s = s + "    document.title = active ? active.label + \" \\u00b7 lume-nsgm\" : cur.startsWith(\"shop\") ? \"\\u5546\\u57ce \\u00b7 lume-nsgm\" : \"lume-nsgm\";\n";
+  s = s + "  }, [cur]);\n";
   if (hasShop) {
     s = s + "  const shopMatch = SHOP_ROUTES.find((r) => cur.startsWith(r.prefix));\n";
   }

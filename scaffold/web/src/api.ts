@@ -3,6 +3,18 @@
 
 export type Row = Record<string, unknown>;
 
+// ---------- 共享展示工具（各 SPA 页复用，金额分->元、状态徽标） ----------
+export function money(cents: number, sym: string): string {
+  return sym + (cents / 100).toFixed(2);
+}
+
+export function statusBadge(st: string): { cls: string; label: string } {
+  if (st === "paid") return { cls: "st st-ok", label: "已支付" };
+  if (st === "pending") return { cls: "st st-warn", label: "待支付" };
+  if (st === "refunded") return { cls: "st st-mut", label: "已退款" };
+  return { cls: "st", label: st };
+}
+
 export interface ListResult {
   total: number;
   items: Row[];

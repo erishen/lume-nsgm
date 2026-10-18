@@ -1,7 +1,7 @@
 // src/pages/RecoverPage.tsx — 恢复关联 ID 并退款（路由 #/shop/recover/:ono）
 // 早期订单缺 paypal_order_id/capture_id 时，凭用户提供的关联 ID 反查或直接标记退款。
 import { useEffect, useState } from "react";
-import { apiShopRefundGet, apiShopRefundPost, type RefundConfirm, type ResultData } from "../api";
+import { apiShopRefundGet, apiShopRefundPost, money, type RefundConfirm, type ResultData } from "../api";
 
 export default function RecoverPage({ ono }: { ono: string }) {
   const [info, setInfo] = useState<RefundConfirm | null>(null);
@@ -62,7 +62,7 @@ export default function RecoverPage({ ono }: { ono: string }) {
         <h1>恢复关联 ID</h1>
         <div className="flash ok">退款成功。{done.manual ? "（仅本地标记）" : ""}</div>
         <p>
-          订单号 <code>{done.order_no}</code> · 金额 <strong>{sym + (done.amount_cents / 100).toFixed(2)}</strong>
+          订单号 <code>{done.order_no}</code> · 金额 <strong>{money(done.amount_cents, sym)}</strong>
         </p>
         <p><a className="btn ghost" href="#/shop">返回商城</a></p>
       </div>
@@ -84,7 +84,7 @@ export default function RecoverPage({ ono }: { ono: string }) {
       <h1>恢复关联 ID</h1>
       {err && <div className="flash err">{err}</div>}
       <p>
-        订单号 <code>{info.order_no}</code> · 金额 <strong>{sym + (info.amount_cents / 100).toFixed(2)}</strong>
+        订单号 <code>{info.order_no}</code> · 金额 <strong>{money(info.amount_cents, sym)}</strong>
       </p>
       <p className="muted" style={{ fontSize: 13 }}>
         早期订单缺失 PayPal 关联记录时，可在 PayPal 后台「交易」页找到订单号或交易号（Transaction ID = 捕获 ID）填入。

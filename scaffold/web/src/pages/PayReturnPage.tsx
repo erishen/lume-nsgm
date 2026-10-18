@@ -2,7 +2,7 @@
 // 后端把 PayPal 的 302 改成指向 /spa/#/pay/return?order_no=&token=&PayerID= 的 hash 路由，
 // 本页解析 hash 查询参数后直接调 /api/pay/return 做捕获（与后端无关 fallback）。
 import { useEffect, useState } from "react";
-import { apiPayReturn, apiPayCancel, type PayReturnResult } from "../api";
+import { apiPayReturn, apiPayCancel, money, type PayReturnResult } from "../api";
 
 function hashQuery(): Record<string, string> {
   const h = window.location.hash || "";
@@ -12,10 +12,6 @@ function hashQuery(): Record<string, string> {
   const out: Record<string, string> = {};
   sp.forEach((v, k) => { out[k] = v; });
   return out;
-}
-
-function money(cents: number, sym: string): string {
-  return sym + (cents / 100).toFixed(2);
 }
 
 export default function PayReturnPage({ mode }: { mode: "return" | "cancel" }) {

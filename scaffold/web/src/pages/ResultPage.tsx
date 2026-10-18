@@ -1,17 +1,6 @@
 // src/pages/ResultPage.tsx — 支付结果（路由 #/shop/result/:ono）
 import { useEffect, useState } from "react";
-import { apiShopResult, type ResultData } from "../api";
-
-function money(cents: number, sym: string): string {
-  return sym + (cents / 100).toFixed(2);
-}
-
-function statusBadge(st: string): { cls: string; label: string } {
-  if (st === "paid") return { cls: "st-ok", label: "已支付" };
-  if (st === "refunded") return { cls: "st-mut", label: "已退款" };
-  if (st === "pending") return { cls: "st-warn", label: "待支付" };
-  return { cls: "st-info", label: st };
-}
+import { apiShopResult, money, statusBadge, type ResultData } from "../api";
 
 export default function ResultPage({ ono }: { ono: string }) {
   const [data, setData] = useState<ResultData | null>(null);
@@ -52,7 +41,7 @@ export default function ResultPage({ ono }: { ono: string }) {
     <div className="panel">
       <h1>支付结果</h1>
       <div className={"flash " + (data.status === "paid" ? "ok" : data.status === "refunded" ? "ok" : "")}>
-        <span className={"st " + b.cls}>{b.label}</span>
+        <span className={b.cls}>{b.label}</span>
       </div>
       <p>
         订单号 <code>{data.order_no}</code>

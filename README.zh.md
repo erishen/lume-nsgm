@@ -346,9 +346,10 @@ python3 scripts/mock_pay_gateway.py --port 18097
   取 Bearer，模块级缓存约 8h）→ `pay.paypal_create`（`POST /v2/checkout/orders`，
   intent=CAPTURE）→ 返回 JSON `{ ok, approve_url, paypal_order_id }`（前端据此跳转）
 - `GET /api/pay/return`：从 `req.query_params` 取 `token` 与 `order_no` → `pay.paypal_capture`
-  （`POST .../capture`）→ 改 `status` 为 `paid`（幂等，已 paid 直接回成功页；
-  捕获成功回填 `paypal_order_id` + `capture_id`）
-- `GET /api/pay/cancel`：用户取消，返回取消页
+  （`POST .../capture`）→ 改 `status` 为 `paid`（幂等，已 paid 直接回成功；
+  捕获成功回填 `paypal_order_id` + `capture_id`）；PayPal approve 后 302 到
+  `/spa/#/pay/return?...`，SPA 解析 hash 参数后调本接口
+- `GET /api/pay/cancel`：用户取消，返回 JSON（SPA `#/pay/cancel` 渲染取消页）
 - `POST /api/pay/webhook`（可选）：`pay.paypal_verify_webhook` 简化 HMAC 验签
 
 `lib/pay.lume` 导出的纯函数（`tests/t7.lume` 已知向量固化）：
@@ -402,16 +403,18 @@ pay.paypal_verify_webhook(secret, id, ts, body, sign_hex)    // HMAC(id\n+ts\n+b
 ### 店面（shop 段，面向顾客的电商前端）
 
 pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay` 同时配置）后，生成
-工程多出一套面向顾客的 SSR 店面（导航多「商城」入口）：
+工程多出一套面向顾客的 React SPA 店面（`/spa/#/shop`，导航多「商城」入口），
+后端只出 JSON API：
 
 | 路由 | 行为 |
 |---|---|
-| `get /shop` | 商品卡片列表（名称/价格 分→元/描述/库存）；**新库空表一次性播种演示商品**（配了 `stock_field` 时播 10/5/0 三档，直接演示售罄态），可在后台 `<product_module>` 里增删改。页内带「**清空商品**」按钮（confirm 后走 `?act=clear`，逐行参数化删——`sql_write` 护栏禁无 WHERE 的 DELETE；订单记录不受影响）；清空后落「已播种」标记（`_nsgm_shop_meta` 元表），**不再自动复活**，空态给出「载入示例商品」（`?act=seed`，仅空表时播种）。清空/重载并回本路由不单独占路由位：lume-core 解释器路由表上限 32 条（`MAX_AL_ROUTES`），PayPal 变体已逼近 |
-| `get /shop/buy/:id?ik=` | 下单扣库存（补偿模式，见下）→ 跳收银台；`ik` 幂等键防重复下单 |
-| `get /shop/pay/:ono` | 收银台：**复用**订单已存的 `paypal_order_id` 重建 approve 链接——重复渲染不重复建单（防孤儿单） |
-| `get /shop/result/:ono` | 支付结果页（paid → 成功并显示金额；pending → 继续支付） |
-| `get /shop/refund/:ono` | 退款：确认页 `?confirm=1` 执行；仅 `paid` 可退、重复退幂等；**网关退款成功后回补库存 +1**。关联 ID 归一（`paypal_order_id`/`capture_id` SQL NULL 读作 lume null 先归一）；旧单缺 `capture_id` 时由 `pay.paypal_get_order` 反查兜底——订单 GET 404（填的是交易号/捕获 ID）自动改查 `pay.paypal_get_capture`，反解真实订单号后继续退款 |
-| `get /shop/recover/:ono` | **早期订单恢复关联 ID**（迁移补列前 `paypal_order_id` 与 `capture_id` 均 NULL 的早期订单）：订单号框填 PayPal 订单号**或交易号（捕获 ID，自动识别）**反查捕获记录，或直接填捕获 ID（直达退款），或标记「已在 PayPal 后台手动退款」本地落库（不调 API）。退款成功回填关联 ID（反解出的真实订单号 + 捕获 ID），使后续操作一致 |
+| `get /api/shop/products` | 商品列表 JSON（名称/价格 分→元/缩略图/库存）；**新库空表一次性播种演示商品**（配了 `stock_field` 时播 10/5/0 三档，直接演示售罄态），可在后台 `<product_module>` 里增删改。`?act=clear` 清空（confirm 由 SPA 前置，逐行参数化删——`sql_write` 护栏禁无 WHERE 的 DELETE；订单记录不受影响）；清空后落「已播种」标记（`_nsgm_shop_meta` 元表），**不再自动复活**；空态由 SPA 给出「载入示例商品」（`?act=seed`，仅空表时播种）。UI：`#/shop` |
+| `post /api/shop/buy` | 下单扣库存（补偿模式，见下）→ 返回收银台数据；`ik` 幂等键 / 同商品最近 pending 单复用，防重复下单 |
+| `get /api/shop/cashier/:ono` | 收银台 JSON：**复用**订单已存的 `paypal_order_id` 重建 approve 链接——重复渲染不重复建单（防孤儿单）。UI：`#/shop/pay/:ono` |
+| `get /api/shop/result/:ono` | 支付结果 JSON（paid → 成功并显示金额；pending → 继续支付）。UI：`#/shop/result/:ono` |
+| `get /api/shop/refund/:ono` · `post /api/shop/refund/:ono` | 退款：GET 出确认数据，POST（`confirm=1`）执行；仅 `paid` 可退、重复退幂等；**网关退款成功后回补库存 +1**。关联 ID 归一（`paypal_order_id`/`capture_id` SQL NULL 读作 lume null 先归一）；旧单缺 `capture_id` 时由 `pay.paypal_get_order` 反查兜底——订单 GET 404（填的是交易号/捕获 ID）自动改查 `pay.paypal_get_capture`，反解真实订单号后继续退款。UI：`#/shop/refund/:ono` |
+| `get /api/pay/return?order_no=&token=` | PayPal approve 后 302 回跳到 `/spa/#/pay/return?...`（hash 路由），SPA 解析参数后调本接口捕获并渲染结果——**后端无需页面 fallback** |
+| `#/shop/recover/:ono`（SPA 页） | **早期订单恢复关联 ID**（迁移补列前 `paypal_order_id` 与 `capture_id` 均 NULL 的早期订单）：订单号框填 PayPal 订单号**或交易号（捕获 ID，自动识别）**反查捕获记录，或直接填捕获 ID（直达退款），或标记「已在 PayPal 后台手动退款」本地落库（不调 API；退款接口对「订单存在但未捕获（APPROVED 无 captures）」返回 `not_captured` 明示无款可退）。退款成功回填关联 ID（反解出的真实订单号 + 捕获 ID），使后续操作一致 |
 
 配置（`example-paypal.json`）：
 
@@ -441,7 +444,7 @@ pay 解决「收钱」，shop 解决「卖货」：配置 `shop` 段（与 `pay`
 选 INSERT-first 而非先扣后建：守卫 UPDATE 才是原子库存操作，且避免「货扣了单没建」的悬挂。
 配了 `product_field` 时，同 `ik` 的重复下单复用最近一笔 pending 单（不依赖唯一索引）。
 
-**PayPal 收银台复用（防孤儿单）**：`/shop/pay/:ono` 每次渲染时，若订单已有
+**PayPal 收银台复用（防孤儿单）**：`/api/shop/cashier/:ono` 每次返回时，若订单已有
 `paypal_order_id` 就直接按订单 ID 重建 approve 链接（mock 网关：
 `{gateway}/mock/paypal/approve?token=<订单ID>`；真实：
 `https://{www|www.sandbox}.paypal.com/checkoutnow?token=<订单ID>`），不再调建单接口；

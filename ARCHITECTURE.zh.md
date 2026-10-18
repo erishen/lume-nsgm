@@ -29,7 +29,7 @@ lume-nsgm 的全部工作分成两个互不重叠的阶段，由同一个 `lume-
 │     · SSR 页面服务器（列表/新建/编辑/删除，表单 GET 提交，无 JS 依赖）  │
 │     · REST API（/api/<module>，POST + JSON body）                       │
 │     · 静态文件服务（docroot：SPA 构建产物 + www/ 回退资源）             │
-│     · 支付对接端（/shop/* + /api/pay/*，PayPal Express Checkout）       │
+│     · 支付对接端（/api/shop/* + /api/pay/*，PayPal）                  │
 │        │                                                               │
 │        ▼                                                               │
 │   SQLite（data/app.db，自动建表 + 自动补列迁移）                        │
@@ -141,21 +141,23 @@ gen/
 | POST | `/api/{ctrl}/update/:id` | REST 更新 |
 | POST | `/api/{ctrl}/delete/:id` | REST 删除 |
 
-**（b）商城与支付路由（base.lume 生成，仅支付变体）**
+**（b）商城与支付路由（base.lume 生成，仅支付变体；页面全量在 React SPA，后端只出 JSON）**
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/shop`（`?act=seed` / `?act=clear`） | 店面（空目录一键载入示例 / 清空；`_nsgm_shop_meta` 记住是否已 seed） |
-| GET | `/shop/buy/:id?ik=` | 下单页（INSERT-first + 补偿扣库存，售罄走售罄页） |
-| GET | `/shop/pay/:ono` | 收银台（复用已建单：有 `paypal_order_id` 直接重建 approve 链接，不重复建单） |
-| GET | `/api/pay/return?order_no=&token=` | PayPal 回跳：捕获 → 订单转 paid → 回填 `paypal_order_id` + `capture_id` |
-| GET | `/api/pay/cancel?order_no=` | 用户取消支付 |
-| POST | `/api/pay/create` | 程序化建单（SPA/API 调用方） |
-| GET | `/shop/result/:ono` | 支付结果查询（轮询友好） |
-| GET | `/shop/refund/:ono?confirm=1` | 退款（仅 paid；重复退幂等；成功后回补库存 +1） |
-| GET | `/shop/recover/:ono` | 关联 ID 恢复（订单号/交易号自动识别，早期单补录回填） |
+| POST | `/api/pay/create` | 程序化建单（返回 `approve_url`，回跳基址 = `/spa/#/pay/return`） |
+| GET | `/api/pay/return?order_no=&token=` | PayPal 回跳捕获（SPA `#/pay/return` 解析 hash 参数后调用）→ 订单转 paid → 回填 `paypal_order_id` + `capture_id` |
+| GET | `/api/pay/cancel?order_no=` | 用户取消支付（JSON；SPA `#/pay/cancel` 渲染取消页） |
+| POST | `/api/pay/webhook` | webhook 事件（可选，HMAC 验签） |
+| GET | `/api/shop/products`（`?act=seed` / `?act=clear`） | 店面商品列表 JSON（空目录一次性播种演示商品 / 清空不复活；`_nsgm_shop_meta` 记播种标记；UI 在 SPA `#/shop`） |
+| POST | `/api/shop/buy` | 下单扣库存 JSON（INSERT-first + 补偿守卫 UPDATE，售罄返回 `sold_out`；同 `ik` 或同商品最近 pending 单复用） |
+| GET | `/api/shop/cashier/:ono` | 收银台 JSON（复用已建单：有 `paypal_order_id` 直接重建 approve 链接，不重复建单） |
+| GET | `/api/shop/result/:ono` | 支付结果 JSON（轮询友好） |
+| GET | `/api/shop/refund/:ono` | 退款确认数据 JSON（含 `need_recover`：早期单双空关联 ID 时提示走恢复页 `#/shop/recover/:ono` 补录） |
+| POST | `/api/shop/refund/:ono` | 执行退款 JSON（`confirm=1`；仅 paid；重复退幂等；成功后回补库存 +1；`ppid`/`capid`/`manual` 三参数覆盖早期订单恢复路径） |
+| GET | `/shop/pay/:ono` · `/shop/result/:ono` | 兼容别名（与 cashier/result 同为 JSON；旧链接不 404） |
 
-**（c）静态与 SPA**：docroot 同时服务 `web/` 构建产物（`/spa/`，hash 路由、同源 `/api`）与 `www/`（SSR 页面样式与回退 JS）。SSR 页面零 JS 依赖；SPA 是增强而非前提。
+**（c）静态与 SPA**：docroot 同时服务 `web/` 构建产物（`/spa/`，hash 路由、同源 `/api`）与 `www/`（SSR 页面样式与回退 JS）。模块 CRUD 页 SSR 与 SPA 双轨并存（SSR 零 JS 依赖）；**商城/收银台/支付回跳/退款/恢复全量在 SPA**（后端只出 JSON，PayPal 回跳走 `#/pay/return` hash 路由，无需后端 fallback）。
 
 ### 3.3 两条请求路径
 

@@ -1,10 +1,6 @@
 // src/pages/RefundPage.tsx — 退款（路由 #/shop/refund/:ono）
 import { useEffect, useState } from "react";
-import { apiShopRefundGet, apiShopRefundPost, type RefundConfirm, type ResultData } from "../api";
-
-function money(cents: number, sym: string): string {
-  return sym + (cents / 100).toFixed(2);
-}
+import { apiShopRefundGet, apiShopRefundPost, money, type RefundConfirm, type ResultData } from "../api";
 
 export default function RefundPage({ ono }: { ono: string }) {
   const [info, setInfo] = useState<RefundConfirm | null>(null);
