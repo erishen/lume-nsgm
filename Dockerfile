@@ -46,7 +46,7 @@ RUN make bin/lume-core HAVE_LLVM=0 \
 # ---------------------------------------------------------------------------
 # Stage 2 — 生成应用 + 构建前端
 # ---------------------------------------------------------------------------
-FROM node:20-bookworm-slim AS app-build
+FROM node:24-bookworm-slim AS app-build
 
 # 国内网络友好：pnpm 与依赖都走 npmmirror
 ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
