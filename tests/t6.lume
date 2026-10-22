@@ -90,6 +90,45 @@ func main() {
   f = f + a.assert_contains(errs[0], "modules[0].fields[0]", "t6: error path modules[0].fields[0]");
   f = f + a.assert_contains(errs[1], "modules[1].fields[0]", "t6: error path modules[1].fields[0]");
 
+  // P2-1 / P2-3：ref / enum 字段类型校验（含 cross-module target 校验）
+  let ref_good = { "modules": [
+    {"name": "product", "fields": [
+      {"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1},
+      {"name": "name", "type": "varchar"}]},
+    {"name": "order", "fields": [
+      {"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1},
+      {"name": "product_id", "type": "ref", "target": "product", "required": 1}]}
+  ]};
+  f = f + a.assert_true(ok(ref_good), "t6: valid ref config (target module has name) must pass");
+  f = f + a.assert_true(has({"modules": [
+    {"name": "product", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "name", "type": "varchar"}]},
+    {"name": "order", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "pid", "type": "ref"}]}
+  ]}, "requires \"target\""), "t6: ref without target must fail");
+  f = f + a.assert_true(has({"modules": [
+    {"name": "product", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "name", "type": "varchar"}]},
+    {"name": "order", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "pid", "type": "ref", "target": "nope"}]}
+  ]}, "not a defined module"), "t6: ref target not a module must fail");
+  f = f + a.assert_true(has({"modules": [
+    {"name": "product", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}]},
+    {"name": "order", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "pid", "type": "ref", "target": "product"}]}
+  ]}, "must have a field named \"name\""), "t6: ref target without name field must fail");
+
+  let enum_good = { "modules": [
+    {"name": "order", "fields": [
+      {"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1},
+      {"name": "status", "type": "enum", "values": ["pending", "paid"]}]}
+  ]};
+  f = f + a.assert_true(ok(enum_good), "t6: valid enum config must pass");
+  f = f + a.assert_true(has({"modules": [
+    {"name": "order", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "status", "type": "enum"}]}
+  ]}, "non-empty \"values\""), "t6: enum without values must fail");
+  f = f + a.assert_true(has({"modules": [
+    {"name": "order", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "status", "type": "enum", "values": []}]}
+  ]}, "non-empty \"values\""), "t6: enum empty values must fail");
+  f = f + a.assert_true(has({"modules": [
+    {"name": "order", "fields": [{"name": "id", "type": "integer", "primary": 1, "auto": 1, "system": 1}, {"name": "status", "type": "enum", "values": ["a'b"]}]}
+  ]}, "safe token"), "t6: enum value with quote must fail (injection surface)");
+
   if (f > 0) {
     print(str(f) + " ASSERTION(S) FAILED");
   }

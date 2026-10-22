@@ -109,7 +109,7 @@ func cmd_config(args): int {
       print("  " + str(k + 1) + ". " + get(errs, k, ""));
       k = k + 1;
     }
-    print("fix the config and re-run. types: varchar/text/integer/decimal/boolean/date/datetime/timestamp; name rule: [a-z][a-z0-9_]*");
+    print("fix the config and re-run. types: varchar/text/integer/decimal/boolean/date/datetime/timestamp/ref/enum; name rule: [a-z][a-z0-9_]*");
     return 1;
   }
   let db = get(cfg, "db", "crm_demo");

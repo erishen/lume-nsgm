@@ -30,7 +30,9 @@ func page_fields(fs, n: int) {
       "form": get(f, "form", 0), "search": get(f, "search", 0),
       "required": get(f, "required", 0), "list": get(f, "list", 0),
       "type": t,
-      "input_type": input_type, "is_ts": is_ts
+      "input_type": input_type, "is_ts": is_ts,
+      "is_ref": get(f, "ref", 0), "target": get(f, "target", ""),
+      "is_enum": get(f, "enum", 0), "values_json": get(f, "values_json", "[]")
     });
     i = i + 1;
   }

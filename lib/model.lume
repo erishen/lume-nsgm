@@ -110,9 +110,22 @@ export func sql_type(f): string {
   if (t == "integer") { return "INTEGER"; }
   if (t == "decimal") { return "REAL"; }
   if (t == "boolean") { return "INTEGER"; }   // 0/1
+  if (t == "ref") { return "INTEGER"; }       // 关联外键：落库为整数 id（不引 SQLite FK，保持迁移简单）
+  if (t == "enum") { return "TEXT"; }         // 枚举：DDL 仍 varchar/text，取值由校验期收窄
   if (t == "date" || t == "datetime" || t == "timestamp") { return "TEXT"; }
   return "TEXT";
 }
+
+// ---- ref / enum 字段辅助（P2-1 / P2-3）----
+
+// 是否引用型字段（外键到另一模块）
+export func fis_ref(f): int { return ftype(f) == "ref" ? 1 : 0; }
+// 是否枚举字段
+export func fis_enum(f): int { return ftype(f) == "enum" ? 1 : 0; }
+// ref 的目标模块名（约定目标模块用 name 字段做显示列）
+export func ftarget(f): string { return str(get(f, "target", "")); }
+// enum 取值数组（原样返回，生成期注入 FIELDS ctx）
+export func fvalues(f) { return get(f, "values", []); }
 
 // 字段是否必填（SQL NOT NULL 判断；主键强制 NOT NULL）
 export func sql_not_null(f): string {

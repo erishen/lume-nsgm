@@ -17,6 +17,38 @@ export let COLS = [
 {{/each}}
 ];
 
+// P2-1：引用字段下拉——从目标模块取 id + 显示列（约定 name），渲染 <select>；
+// selected 为当前存储的 id（字符串），命中即标 selected。列表/编辑表单共用。
+func ref_select(target: string, dispcol: string, name: string, selected: string): string {
+  let rows = sql_query(db.dsn(), "SELECT \"id\", \"" + dispcol + "\" FROM \"" + target + "\" ORDER BY id", []);
+  let h = "<select name=\"" + name + "\">";
+  let i = 0;
+  while (i < len(rows)) {
+    let r = rows[i];
+    let idv = str(get(r, "id", 0));
+    let lbl = str(get(r, dispcol, ""));
+    let sel = (idv == selected ? " selected" : "");
+    h = h + "<option value=\"" + ui.esc(idv) + "\"" + sel + ">" + ui.esc(lbl) + "</option>";
+    i = i + 1;
+  }
+  return h + "</select>";
+}
+
+// P2-3：枚举选项 <option> 串（values_json 为 ["a","b"] 形式的 JSON 字符串）；
+// selected 命中即标 selected（编辑页回显）。取值由校验期收窄，ui.esc 防注入。
+func enum_opts_html(values_json: string, selected: string): string {
+  let vals = json(values_json);
+  let h = "";
+  let i = 0;
+  while (i < len(vals)) {
+    let vv = str(get(vals, i, ""));
+    let sel = (vv == selected ? " selected" : "");
+    h = h + "<option value=\"" + ui.esc(vv) + "\"" + sel + ">" + ui.esc(vv) + "</option>";
+    i = i + 1;
+  }
+  return h;
+}
+
 // 生成期拼好的列固定 SQL（值一律 ? 绑定，由 handler 追加）
 let INSERT_SQL = "{{insert_sql}}";
 let UPDATE_SQL = "{{update_sql}}"; // ... WHERE id = ?（id 由 handler 追加）
@@ -49,8 +81,9 @@ func list_rows(page: int, pageSize: int, qp) {
   let args = db.push_all([], get(w, "params", []));
   push(args, pageSize);
   push(args, page * pageSize);
-  let rows = sql_query(db.dsn(), "SELECT * FROM \"" + TBL + "\"" + where + " ORDER BY id DESC LIMIT ? OFFSET ?", args);
-  let cnt = sql_query(db.dsn(), "SELECT COUNT(*) AS counts FROM \"" + TBL + "\"" + where, get(w, "params", []));
+  // P2-2：列表走 JOIN 视图（{{list_head}} 已由生成器拼好 SELECT/FROM/JOIN，ref 字段投影为 <field>_name）
+  let rows = sql_query(db.dsn(), {{list_head}} + where + " ORDER BY \"t\".id DESC LIMIT ? OFFSET ?", args);
+  let cnt = sql_query(db.dsn(), {{list_count}} + where, get(w, "params", []));
   return { "total": db.count_of(cnt), "items": rows };
 }
 
@@ -177,6 +210,14 @@ func list_body(qp) {
         if (v == "pending") { sc = "st-warn"; }
         if (v == "refunded") { sc = "st-mut"; }
         body = body + "<td><span class=\"st " + sc + "\">" + ui.esc(v) + "</span></td>";
+      } else if (get(f, "enum", 0) == 1) {
+        // P2-3：枚举字段渲染为彩色 tag（取值由校验期收窄，无注入面）
+        body = body + "<td><span class=\"tag\">" + ui.esc(v) + "</span></td>";
+      } else if (get(f, "ref", 0) == 1) {
+        // P2-2：引用字段显示关联名（列表 JOIN 投影的 <field>_name 列），无则回落原始 id
+        let rv = str(get(r, get(f, "name", "") + "_name", ""));
+        if (rv != "" && rv != "null") { v = rv; }
+        body = body + "<td>" + ui.esc(v) + "</td>";
       } else {
       // 时间列暴露原始值（data-ts），由 app.js 转本地友好格式
       let ts_attr = "";
@@ -248,11 +289,23 @@ func form_page(id: int, vals, msg: string): string {
       // NULL 归一（同列表列）：编辑页预填不能把 "null" 字面量写进输入框
       let fv = str(get(vals, get(f, "name", ""), ""));
       if (fv == "null") { fv = ""; }
-      body = body + "  <label>" + ui.esc(get(f, "label", ""))
-        + (req ? "<span class=\"req\"> *</span>" : "") + "\n"
-        + "    <input name=\"" + get(f, "name", "") + "\" value=\""
-        + ui.esc(fv) + "\""
-        + (req ? " required" : "") + ">\n  </label>\n";
+      let lbl = ui.esc(get(f, "label", "")) + (req ? "<span class=\"req\"> *</span>" : "");
+      if (get(f, "ref", 0) == 1) {
+        // P2-1：引用字段渲染关联下拉（选项来自目标模块，selected = 当前 id）
+        body = body + "  <label>" + lbl + "\n    "
+          + ref_select(get(f, "target", ""), get(f, "ref_disp", ""), get(f, "name", ""), fv)
+          + "\n  </label>\n";
+      } else if (get(f, "enum", 0) == 1) {
+        // P2-3：枚举字段渲染固定选项下拉（selected = 当前值）
+        body = body + "  <label>" + lbl + "\n    <select name=\""
+          + get(f, "name", "") + "\">" + enum_opts_html(get(f, "values_json", ""), fv)
+          + "</select>\n  </label>\n";
+      } else {
+        // 普通字段：文本/数值输入框
+        body = body + "  <label>" + lbl + "\n    <input name=\"" + get(f, "name", "")
+          + "\" value=\"" + ui.esc(fv) + "\""
+          + (req ? " required" : "") + ">\n  </label>\n";
+      }
     }
     i = i + 1;
   }

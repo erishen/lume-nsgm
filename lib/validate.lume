@@ -8,7 +8,7 @@
 //（CREATE TABLE "name"）与 URL 路由，宽松即注入面——曾实测
 // "evil\"; DROP TABLE x--" 可原样穿过生成器直达产物。
 
-let TYPES = ",varchar,text,integer,decimal,boolean,date,datetime,timestamp,";
+let TYPES = ",varchar,text,integer,decimal,boolean,date,datetime,timestamp,ref,enum,";
 let LOWER = "abcdefghijklmnopqrstuvwxyz";
 let IDENT = "abcdefghijklmnopqrstuvwxyz0123456789_";
 // SQL 单引号字面量的合法字符集（DDL 注入面收窄）
@@ -138,7 +138,34 @@ export func validate_config(cfg) {
             push(errs, fat + ": missing required \"type\"");
           } else {
             if (!contains(TYPES, "," + ty + ",")) {
-              push(errs, fat + ": unknown type \"" + ty + "\" (supported: varchar/text/integer/decimal/boolean/date/datetime/timestamp)");
+              push(errs, fat + ": unknown type \"" + ty + "\" (supported: varchar/text/integer/decimal/boolean/date/datetime/timestamp/ref/enum)");
+            }
+            // ref 字段：target 必须给出且为合法标识符（指向已定义模块在下方第二遍校验）
+            if (ty == "ref") {
+              let tgt = str(get(f, "target", ""));
+              if (tgt == "") {
+                push(errs, fat + ": ref field requires \"target\" (the referenced module name)");
+              } else if (valid_ident(tgt) == 0) {
+                push(errs, fat + ": ref \"target\" must match [a-z][a-z0-9_]* (got \"" + tgt + "\")");
+              }
+            }
+            // enum 字段：values 必须非空且每个值为安全 token（<=32 字符、无引号/尖括号，防注入进 DDL/HTML）
+            if (ty == "enum") {
+              let vals = get(f, "values", null);
+              if (vals == null || len(vals) == 0) {
+                push(errs, fat + ": enum field requires non-empty \"values\" array");
+              } else {
+                let vi = 0;
+                while (vi < len(vals)) {
+                  let vv = str(get(vals, vi, ""));
+                  if (len(vv) == 0 || len(vv) > 32
+                      || contains(vv, "'") || contains(vv, "\"")
+                      || contains(vv, "<") || contains(vv, ">")) {
+                    push(errs, fat + ": enum value \"" + vv + "\" must be a safe token (1..32 chars, no quotes/<>)");
+                  }
+                  vi = vi + 1;
+                }
+              }
             }
           }
           let fd = get(f, "default", null);
@@ -152,6 +179,46 @@ export func validate_config(cfg) {
       }
     }
     i = i + 1;
+  }
+  // 第二遍（cross-module）：ref 字段的 target 必须指向已定义模块，且该模块须有
+  // 名为 "name" 的显示列（关联名展示依赖此约定；没有则列表/下拉无法显示关联名）
+  let j2 = 0;
+  while (j2 < len(mods)) {
+    let mod2 = get(mods, j2, null);
+    if (mod2 != null) {
+      let fs2 = get(mod2, "fields", []);
+      let k2 = 0;
+      while (k2 < len(fs2)) {
+        let f2 = get(fs2, k2, null);
+        if (f2 != null && str(get(f2, "type", "")) == "ref") {
+          let tgt = str(get(f2, "target", ""));
+          let found = 0;
+          let has_name = 0;
+          let m3 = 0;
+          while (m3 < len(mods)) {
+            let tmod = get(mods, m3, null);
+            if (tmod != null && str(get(tmod, "name", "")) == tgt) {
+              found = 1;
+              let tfs = get(tmod, "fields", []);
+              let t4 = 0;
+              while (t4 < len(tfs)) {
+                if (str(get(get(tfs, t4, null), "name", "")) == "name") { has_name = 1; }
+                t4 = t4 + 1;
+              }
+            }
+            m3 = m3 + 1;
+          }
+          let fat2 = "modules[" + str(j2) + "].fields[" + str(k2) + "]";
+          if (found == 0) {
+            push(errs, fat2 + ": ref target \"" + tgt + "\" is not a defined module");
+          } else if (has_name == 0) {
+            push(errs, fat2 + ": ref target \"" + tgt + "\" must have a field named \"name\" (display column for the relation)");
+          }
+        }
+        k2 = k2 + 1;
+      }
+    }
+    j2 = j2 + 1;
   }
   // pay 段（可选）：支付接线校验（密钥只认环境变量名，值不进配置）
   let pay = get(cfg, "pay", null);

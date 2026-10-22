@@ -11,6 +11,10 @@ type Field = {
   list: number;
   input_type: string;
   is_ts: number;
+  is_ref: number;
+  target: string;
+  is_enum: number;
+  values_json: string[];
 };
 
 const CTRL = "{{ctrl}}";
@@ -18,7 +22,7 @@ const CTRL = "{{ctrl}}";
 const CSYM = "{{csym}}";
 
 const FIELDS: Field[] = [
-{{#each fields as f}}  { name: "{{f.name}}", label: "{{f.label}}", form: {{f.form}}, search: {{f.search}}, required: {{f.required}}, list: {{f.list}}, input_type: "{{f.input_type}}", is_ts: {{f.is_ts}} },
+{{#each fields as f}}  { name: "{{f.name}}", label: "{{f.label}}", form: {{f.form}}, search: {{f.search}}, required: {{f.required}}, list: {{f.list}}, input_type: "{{f.input_type}}", is_ts: {{f.is_ts}}, is_ref: {{f.is_ref}}, target: "{{f.target}}", is_enum: {{f.is_enum}}, values_json: {{f.values_json}} },
 {{/each}}
 ];
 
@@ -45,6 +49,15 @@ function cellText(f: Field, row: Row): JSX.Element {
   if (f.name === "status") {
     const b = statusBadge(s);
     return b.plain ? <>{s}</> : <span className={b.cls}>{s}</span>;
+  }
+  // P2-3：枚举字段渲染彩色 tag
+  if (f.is_enum === 1) {
+    return <span className="tag">{s}</span>;
+  }
+  // P2-2：引用字段优先显示关联名（列表 JOIN 投影的 <field>_name 列），无则回落原始 id
+  if (f.is_ref === 1) {
+    const refName = row[f.name + "_name"];
+    return <>{String(refName ?? raw ?? "")}</>;
   }
   if (CSYM && f.name.endsWith("_cents")) {
     return <>{money(raw)}</>;
@@ -74,6 +87,22 @@ export default function {{Ctrl}}Page() {
   const [err, setErr] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [sort, setSort] = useState<{ k: string; dir: 1 | -1 } | null>(null);
+  // P2-1：引用字段下拉选项（按 target 模块批量拉取；编辑/新增时填充）
+  const [refOptions, setRefOptions] = useState<Record<string, { id: number; label: string }[]>>({});
+  async function loadRefOptions() {
+    const targets = Array.from(new Set(FORM_FIELDS.filter((f) => f.is_ref === 1).map((f) => f.target)));
+    for (const t of targets) {
+      try {
+        const res = await apiList(t, { page: 0, pageSize: 200 });
+        setRefOptions((prev) => ({
+          ...prev,
+          [t]: (res.items || []).map((r: Row) => ({ id: Number(r.id), label: String(r.name ?? r.id) })),
+        }));
+      } catch {
+        /* 关联模块不可达时下拉留空，不影响其它字段 */
+      }
+    }
+  }
 
   async function load(p: number, query: string) {
     try {
@@ -103,11 +132,13 @@ export default function {{Ctrl}}Page() {
   }
 
   function openNew() {
+    loadRefOptions();
     setEditing({});
   }
 
   function openEdit(row: Row, e: MouseEvent) {
     e.preventDefault();
+    loadRefOptions();
     setEditing({ ...row });
   }
 
@@ -205,13 +236,41 @@ export default function {{Ctrl}}Page() {
             <label key={f.name}>
               {f.label}
               {f.required === 1 ? <span className="req"> *</span> : null}
-              <input
-                name={f.name}
-                type={f.input_type}
-                required={f.required === 1}
-                value={String(editing[f.name] ?? "")}
-                onChange={(e) => setEditing({ ...editing, [f.name]: e.target.value })}
-              />
+              {f.is_ref === 1 ? (
+                <select
+                  name={f.name}
+                  required={f.required === 1}
+                  value={String(editing[f.name] ?? "")}
+                  onChange={(e) => setEditing({ ...editing, [f.name]: e.target.value })}
+                >
+                  {(refOptions[f.target] || []).map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : f.is_enum === 1 ? (
+                <select
+                  name={f.name}
+                  required={f.required === 1}
+                  value={String(editing[f.name] ?? "")}
+                  onChange={(e) => setEditing({ ...editing, [f.name]: e.target.value })}
+                >
+                  {(f.values_json as string[]).map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  name={f.name}
+                  type={f.input_type}
+                  required={f.required === 1}
+                  value={String(editing[f.name] ?? "")}
+                  onChange={(e) => setEditing({ ...editing, [f.name]: e.target.value })}
+                />
+              )}
             </label>
           ))}
           <div className="form-actions">

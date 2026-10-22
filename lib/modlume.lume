@@ -70,6 +70,20 @@ export func build_fields(fs, n: int) {
     let fmt = "";
     if (substr(nm, len(nm) - 6, 6) == "_cents") { fmt = "money"; }
     if (nm == "status") { fmt = "st"; }
+    // P2-1 / P2-3：ref / enum 元数据注入（mod.tpl 与 reactgen 共用）
+    let is_ref = m.fis_ref(f);
+    let is_enum = m.fis_enum(f);
+    let ref_target = "";
+    let ref_disp = "";
+    if (is_ref == 1) {
+      ref_target = m.ftarget(f);
+      ref_disp = "name";   // 约定关联显示列 = 目标模块的 name 字段
+    }
+    let values_json = "[]";
+    if (is_enum == 1) {
+      let vals = m.fvalues(f);
+      values_json = json(vals);
+    }
     push(fields, {
       "name": nm, "label": label,
       "form": form, "search": search,
@@ -80,7 +94,9 @@ export func build_fields(fs, n: int) {
       "type_sql": m.sql_type(f),
       "not_null": m.sql_not_null(f) != "",
       "auto": m.fauto(f) == 1,
-      "default": m.sql_default(f)
+      "default": m.sql_default(f),
+      "ref": is_ref, "target": ref_target, "ref_disp": ref_disp,
+      "enum": is_enum, "values_json": values_json
     });
     i = i + 1;
   }
@@ -95,12 +111,36 @@ export func gen_module(ctrl: string, fs, n: int, refund, cur: string): string {
   let fields = build_fields(fs, n);
   let fidx = m.form_idx(fs, n);
   let ddl = trim(sqlgen.gen_sql(ctrl, fs, n, ""));
+  // P2-2：列表 JOIN 渲染——ref 字段 LEFT JOIN 目标表，并把关联名投影为
+  // "<field>_name" 列；列表查询与计数查询都复用这份 FROM/JOIN 片段。
+  // 列/表名均来自 schema 白名单（标识符形状），无注入面。
+  let list_select = "\"t\".\"id\"";
+  let list_from = "FROM \"" + ctrl + "\" AS t";
+  let li = 0;
+  while (li < len(fields)) {
+    let f = fields[li];
+    let fnm = get(f, "name", "");
+    if (fnm != "id") { list_select = list_select + ", \"t\".\"" + fnm + "\""; }
+    if (get(f, "ref", 0) == 1) {
+      let tgt = get(f, "target", "");
+      let disp = get(f, "ref_disp", "name");
+      list_from = list_from
+        + " LEFT JOIN \"" + tgt + "\" ON \"t\".\"" + fnm + "\" = \"" + tgt + "\".\"id\"";
+      list_select = list_select
+        + ", \"" + tgt + "\".\"" + disp + "\" AS \"" + fnm + "_name\"";
+    }
+    li = li + 1;
+  }
+  let list_head = "SELECT " + list_select + " " + list_from;
+  let list_count = "SELECT COUNT(DISTINCT \"t\".\"id\") AS counts " + list_from;
   let ctx = {
     "ctrl": ctrl, "table": ctrl,
     "fields": fields,
     "ddl": lume_str(ddl),
     "insert_sql": lume_str(build_insert(ctrl, fs, fidx)),
     "update_sql": lume_str(build_update(ctrl, fs, fidx)),
+    "list_head": "\"" + lume_str(list_head) + "\"",
+    "list_count": "\"" + lume_str(list_count) + "\"",
     "refund_on": refund == null ? "" : "1",
     "refund_no_f": refund == null ? "order_no" : str(get(refund, "no_field", "order_no")),
     "refund_st_f": refund == null ? "status" : str(get(refund, "st_field", "status")),

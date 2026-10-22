@@ -32,8 +32,8 @@ fails = fails + a.assert_contains(page, "window.confirm(\"确认删除该记录�
 fails = fails + a.assert_contains(page, "fmtTime(row[f.name])", "t5: timestamp cells via fmtTime");
 
 // 数据驱动字段：number 输入映射 decimal、时间列标记 is_ts、searchable 暴露
-fails = fails + a.assert_contains(page, "{ name: \"amount\", label: \"金额\", form: 1, search: 0, required: 0, list: 1, input_type: \"number\", is_ts: 0 }", "t5: decimal field maps to number input");
-fails = fails + a.assert_contains(page, "{ name: \"create_date\", label: \"创建时间\", form: 0, search: 0, required: 0, list: 1, input_type: \"text\", is_ts: 1 }", "t5: system timestamp excluded from form, marked is_ts");
+fails = fails + a.assert_contains(page, "{ name: \"amount\", label: \"金额\", form: 1, search: 0, required: 0, list: 1, input_type: \"number\", is_ts: 0, is_ref: 0, target: \"\", is_enum: 0, values_json: [] }", "t5: decimal field maps to number input");
+fails = fails + a.assert_contains(page, "{ name: \"create_date\", label: \"创建时间\", form: 0, search: 0, required: 0, list: 1, input_type: \"text\", is_ts: 1, is_ref: 0, target: \"\", is_enum: 0, values_json: [] }", "t5: system timestamp excluded from form, marked is_ts");
 fails = fails + a.assert_contains(page, "const HAS_SEARCH = FIELDS.some((f) => f.search === 1);", "t5: search box conditional on searchable fields");
 
 // 不得有未渲染 mustache / 模板残留
