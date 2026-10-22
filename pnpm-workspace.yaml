@@ -1,0 +1,19 @@
+# lume-nsgm 的 pnpm 工作区。
+#
+# 背景：scaffold/web 是「静态基座」模板碎片（App.tsx / ui.css 由生成器
+# lib/reactgen.lume 写入），自身不可独立构建，因此不是工作区成员。
+# 可构建的 web 工程只存在于生成产物目录（gen/、gen-paypal/ 等，均被
+# .gitignore 忽略），用 glob 纳入：目录不存在时自动匹配为空。
+#
+# 用法（仓库根）：
+#   pnpm install      # 为所有已生成的 web 工程装依赖
+#   pnpm -r build     # 对每个生成物跑 tsc(noEmit 类型检查) && vite build
+packages:
+  - "gen*/web"
+
+# pnpm 12 默认拦截依赖的 install/postinstall 脚本。scaffold/web 模板里自带
+# 一份 allowBuilds（随生成物复制，生成物单独 pnpm install 时它是根、会生效）；
+# 但作为本工作区成员安装时 pnpm 只读根配置，故此处必须重复声明，否则
+# esbuild 的二进制校验脚本被拦 → ERR_PNPM_IGNORED_BUILDS。
+allowBuilds:
+  esbuild: true

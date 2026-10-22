@@ -1,0 +1,14 @@
+{
+  "name": "lume-nsgm",
+  "version": "1.0.0",
+  "description": "",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "make test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

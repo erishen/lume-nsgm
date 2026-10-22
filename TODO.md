@@ -62,7 +62,12 @@
       （`refOptions` + `loadRefOptions`）、enum 渲染（`<select>` / `<span class="tag">`）、
       ref 列表显示 `<field>_name` 回落 id，均已落入 `reactgen.lume` + `templates/react_page.tpl`；
       店面保持 SSR（无 React 店面页，故「店面路由」React 同步不适用）。`make test`(t5) 已覆盖
-      扩键回归。`tsc && vite build` noEmit 验证待 pnpm 环境（P2-6 收尾项）
+      扩键回归。**`tsc && vite build` noEmit 验证已完成**（✅ 2026-10-22 晚）：根级
+      `pnpm-workspace.yaml`（`packages: ["gen*/web"]` + `allowBuilds: esbuild`）落地后，
+      `pnpm install && pnpm -r build` 对 gen/web 与 gen-paypal/web 双双通过——tsc
+      （strict + noUnusedLocals/Parameters）零错误，vite 产出 dist。修复了根级 pnpm
+      装不到成员依赖的坑（根级 pnpm-workspace.yaml：`packages: ["gen*/web"]` +
+      `allowBuilds: esbuild`；scaffold/web 是模板碎片不可独立构建故非成员）
 - [x] **P2-7 回归**（✅ 2026-10-22）：`tests/t6.lume` 加 8 条 ref/enum 校验断言
       （正例 + ref 无 target / target 非模块 / target 无 name；enum 无 values / 空 values /
       values 含引号）；`scripts/e2e.sh` 加「购物车」全链路阶段——加购 → session 持久

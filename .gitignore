@@ -8,3 +8,6 @@ __pycache__/
 .env
 .env.local
 get-test/
+# workspace 成员（gen*/web）均被 gitignore，提交 lockfile 会让新克隆的
+# pnpm install --frozen-lockfile 因 importer 缺失而失败，故不跟踪
+pnpm-lock.yaml
