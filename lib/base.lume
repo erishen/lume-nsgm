@@ -160,6 +160,36 @@ export func gen_shop_block(shop, pay): string {
   return tpl.render(tpl_text, ctx);
 }
 
+// 生成购物车接线块（P2-4，与店面同时注入）：落库购物车 + session 存 cart_id。
+// ctx 复用店面的模块/字段绑定（pm/nf/pf/om/onf/amf/stf/prdf/pnmf/skf/csym/
+// has_pref/has_name/has_stock），模板另需 ppidf/capf。
+export func gen_cart_block(shop, pay): string {
+  let pm = str(get(shop, "product_module", "product"));
+  let nf = str(get(shop, "name_field", "name"));
+  let pf = str(get(shop, "price_field", "price_cents"));
+  let om = str(get(pay, "order_module", ""));
+  let onf = str(get(pay, "order_no_field", "order_no"));
+  let amf = str(get(pay, "amount_field", "amount_cents"));
+  let stf = str(get(pay, "status_field", "status"));
+  let ppidf = str(get(pay, "paypal_order_field", "paypal_order_id"));
+  let capf = str(get(pay, "capture_id_field", "capture_id"));
+  let prdf = str(get(shop, "product_field", ""));
+  let pnmf = str(get(shop, "product_name_field", ""));
+  let skf = str(get(shop, "stock_field", ""));
+  let has_pref = (prdf != "" ? "1" : "0");
+  let has_name = (pnmf != "" ? "1" : "0");
+  let has_stock = (skf != "" && prdf != "" ? "1" : "0");
+  let ctx = {
+    "pm": pm, "nf": nf, "pf": pf, "om": om, "onf": onf, "amf": amf, "stf": stf,
+    "ppidf": ppidf, "capf": capf, "prdf": prdf, "pnmf": pnmf, "skf": skf,
+    "csym": str(get(pay, "currency_symbol", "$")),
+    "has_pref": has_pref, "has_name": has_name, "has_stock": has_stock
+  };
+  let tpl_text = read_file("templates/cart_block.lume.tpl");
+  if (tpl_text == null) { return "// ERROR: templates/cart_block.lume.tpl missing"; }
+  return tpl.render(tpl_text, ctx);
+}
+
 // 生成 app.lume 入口：server 块 + 模块装配（import 即注册路由）+ 建表 + run()
 // 顺序对照 lume 仓 examples/demo.lume：server{} -> routes(经 import) -> run()
 // pay 为 config.pay（validate_pay 已过）或 null；非 null 时注入支付接线块。
@@ -177,6 +207,15 @@ export func gen_app_entry(out: string, mods, pay, shop): int {
     }
     i = i + 1;
   }
+  // 购物车表（P2-4）：固定 schema，非用户配置模块；经 db.init 建表+迁移。
+  // 列/表名均为白名单标识符（无注入面）；DDL 经 replace 转义后内联为 lume 字符串字面量。
+  let cart_ddl = "CREATE TABLE IF NOT EXISTS \"cart\" (\"id\" INTEGER PRIMARY KEY, \"status\" TEXT DEFAULT 'active', \"created_at\" TEXT)";
+  let cart_item_ddl = "CREATE TABLE IF NOT EXISTS \"cart_item\" (\"id\" INTEGER PRIMARY KEY, \"cart_id\" INTEGER, \"product_id\" INTEGER, \"qty\" INTEGER, \"price_cents\" INTEGER, \"name\" TEXT)";
+  if (ddl_args != "") { ddl_args = ddl_args + ", "; }
+  ddl_args = ddl_args
+    + "{ \"name\": \"cart\", \"ddl\": \"" + replace(cart_ddl, "\"", "\\\"") + "\", \"cols\": [{\"name\":\"id\",\"type_sql\":\"INTEGER\",\"auto\":true},{\"name\":\"status\",\"type_sql\":\"TEXT\"},{\"name\":\"created_at\",\"type_sql\":\"TEXT\"}] }"
+    + ", "
+    + "{ \"name\": \"cart_item\", \"ddl\": \"" + replace(cart_item_ddl, "\"", "\\\"") + "\", \"cols\": [{\"name\":\"id\",\"type_sql\":\"INTEGER\",\"auto\":true},{\"name\":\"cart_id\",\"type_sql\":\"INTEGER\"},{\"name\":\"product_id\",\"type_sql\":\"INTEGER\"},{\"name\":\"qty\",\"type_sql\":\"INTEGER\"},{\"name\":\"price_cents\",\"type_sql\":\"INTEGER\"},{\"name\":\"name\",\"type_sql\":\"TEXT\"}] }";
   if (pay != null) {
     imports = imports + "import \"lib/pay.lume\" as pay;\n";
   }
@@ -194,7 +233,7 @@ export func gen_app_entry(out: string, mods, pay, shop): int {
     + "\n// 首次启动自动建表（CREATE TABLE IF NOT EXISTS），并对已有表补齐新增列（迁移）\n"
     + "db.init([" + ddl_args + "]);\n\n"
     + (pay != null ? gen_paypal_block(pay) + "\n" : "")
-    + (pay != null && shop != null ? gen_shop_block(shop, pay) + "\n" : "")
+    + (pay != null && shop != null ? gen_shop_block(shop, pay) + "\n" + gen_cart_block(shop, pay) + "\n" : "")
     // 首页：全量 SPA，根路径直接引导到 /spa/（SPA 内含店面与管理后台）
     + "get \"/\", func(req) {\n"
     + "  return \"<!DOCTYPE html><html lang=\\\"zh-CN\\\"><head><meta charset=\\\"utf-8\\\"><meta http-equiv=\\\"refresh\\\" content=\\\"0;url=/spa/\\\"><title>lume-nsgm</title></head><body><p>正在进入应用…若未跳转，请<a href=\\\"/spa/\\\">点击这里</a>。</p></body></html>\";\n"

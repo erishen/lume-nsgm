@@ -37,22 +37,40 @@
 
 目标：生成器直接产出电商骨架——关系、购物车、面向顾客的店面。
 
-- [ ] **P2-1 引用型字段**：schema 支持 `{"name":"product_id","type":"ref","target":"product"}`
-      —— `lib/validate.lume` TYPES 加 `ref` + target 必须指向已定义模块；`lib/model.lume`
-      解析；`templates/sql.tpl` 仍出裸 integer 列（不引 SQLite FK，保持迁移简单）
-- [ ] **P2-2 列表 JOIN 渲染**：`templates/mod.tpl` 对 ref 字段生成
-      `SELECT ... JOIN` 显示关联名称（`sql_query` 放行任意 SELECT，无需改 core）
-- [ ] **P2-3 enum 字段**：`{"name":"status","type":"enum","values":[...]}` —— 校验期收窄
-      取值，DDL 仍 varchar；表单/列表按 values 渲染
-- [ ] **P2-4 购物车**：`scaffold/lib/cart.lume` + `templates/cart.tpl`——**落库持久化**
-      （`cart`/`cart_item` 表），session 里只放 cart_id（原因见「已知边界」S1）
+- [x] **P2-1 引用型字段**（✅ 2026-10-22）：schema 支持 `{"name":"product_id","type":"ref","target":"product"}`
+      —— `lib/validate.lume` TYPES 加 `ref` + target 必须指向已定义模块（第二遍 cross-module
+      校验）；`lib/model.lume` 解析（`sql_type`→INTEGER + `fis_ref/ftarget` 辅助）；
+      DDL 仍出裸 integer 列（不引 SQLite FK，保持迁移简单）
+- [x] **P2-2 列表 JOIN 渲染**（✅ 2026-10-22）：`lib/modlume.lume` `gen_module` 对 ref 字段生成
+      `list_head/list_count`（`SELECT ... LEFT JOIN ... <field>_name`），`templates/mod.tpl`
+      列表行显示关联名（回落原始 id）；`sql_query` 放行任意 SELECT，无需改 core
+- [x] **P2-3 enum 字段**（✅ 2026-10-22）：`{"name":"status","type":"enum","values":[...]}` ——
+      校验期收窄取值（非空 + 每值安全 token），DDL 仍 varchar；表单/列表按 values 渲染
+      （`<select>` / `<span class="tag">`）
+- [x] **P2-4 购物车**（✅ 2026-10-22）：落库持久化（`cart`/`cart_item` 表），session 里只放
+      cart_id（原因见「已知边界」S1）。实现同构于现有 shop：`lib/base.lume`
+      `gen_cart_block`(生成) + `templates/cart_block.lume.tpl`(JSON API) +
+      `db.init` 注入 cart/cart_item 两张固定表；加购(合并同名数量)→查看→改量→移除→
+      结算逐行复用单商品建单 + 库存守卫（P1-2 口径），成功行清出购物车、售罄行保留、
+      全清则 cart 标记 done。**加性**：不改动既有「直接下单」/api/shop/buy 链路。
+      运行期实测：session 跨请求持久（WORKERS=1）、结算建单 CART-* + 精确扣库存、
+      售罄拒单保留、done 后再加购新建购物车，全绿
 - [x] ~~**P2-5 店面模板**~~（2026-10-16 被 P3-9 取代并完成）：顾客端店面最终以
       `config.shop` 段 + SSR 路由落地（非独立 storefront.tpl 模板），见文末 P3-9；
       购物车/结算走「直接下单」演示路径，落库购物车（P2-4）仍未做
-- [ ] **P2-6 React SPA 同步扩展**：ref 字段下拉选项来自 `/api/<target>`、enum 渲染、
-      店面路由；`tsc && vite build` 保持 noEmit 不脏源码
-- [ ] **P2-7 回归**：`tests/` 加 t7（ref/enum 校验断言）；e2e 加「加购→下单→库存扣减」
-      全链路探针
+- [x] **P2-6 React SPA 同步扩展**（✅ 2026-10-22）：ref 字段下拉选项来自 `/api/<target>`
+      （`refOptions` + `loadRefOptions`）、enum 渲染（`<select>` / `<span class="tag">`）、
+      ref 列表显示 `<field>_name` 回落 id，均已落入 `reactgen.lume` + `templates/react_page.tpl`；
+      店面保持 SSR（无 React 店面页，故「店面路由」React 同步不适用）。`make test`(t5) 已覆盖
+      扩键回归。`tsc && vite build` noEmit 验证待 pnpm 环境（P2-6 收尾项）
+- [x] **P2-7 回归**（✅ 2026-10-22）：`tests/t6.lume` 加 8 条 ref/enum 校验断言
+      （正例 + ref 无 target / target 非模块 / target 无 name；enum 无 values / 空 values /
+      values 含引号）；`scripts/e2e.sh` 加「购物车」全链路阶段——加购 → session 持久
+      （同 cookie 复得购物车）→ 结算建单 CART-* + 扣库存 → 清空 → 售罄拒单且保留，
+      独立 cookie 会话、与直接下单正交。**顺带根治**：e2e 启动 PayPal mock app 时补
+      `PAYPAL_CLIENT_ID` 内联覆盖——否则 Makefile `-include .env` + `export PAYPAL_CLIENT_ID`
+      会把 .env 里的真实 client_id 泄漏进 mock app 致 OAuth2 401（`make test-e2e` 挂、
+      直接跑 e2e.sh 不挂的差异根源）
 
 验收：新 config 一键生成店面+admin，`make check && make test && make test-e2e` 全绿。
 

@@ -167,9 +167,13 @@ PY
     python3 scripts/mock_pay_gateway.py >/tmp/nsgm-mock-gw-pp.log 2>&1 &
   PP_MOCK_PID=$!
   # 应用：PAY_GATEWAY 指向本阶段独立起的 PayPal mock；client_secret 走
-  # PAYPAL_KEY（避开部分环境对含 SECRET/TOKEN 的变量名过滤）
+  # PAYPAL_KEY（避开部分环境对含 SECRET/TOKEN 的变量名过滤）。
+  # PAYPAL_CLIENT_ID 必须显式内联覆盖：Makefile `-include .env` + `export
+  # PAYPAL_CLIENT_ID` 会把 .env 里的真实 client_id 泄漏进本进程（直接跑
+  # e2e.sh 不经 make 则无此问题）；不覆盖的话 app 用真实 id、mock 期望
+  # AUmock… → OAuth2 401。故四个凭证/网关变量全部内联钉死为 mock 值。
   ( cd gen-paypal && PORT="$PP_APP_PORT" HOST=127.0.0.1 WORKERS=1 \
-      NSGM_DB="$PAYPAL_DB" PAYPAL_KEY="$PP_SECRET" \
+      NSGM_DB="$PAYPAL_DB" PAYPAL_KEY="$PP_SECRET" PAYPAL_CLIENT_ID="$PP_CLIENT_ID" \
       PAY_GATEWAY="$PMB" PAYPAL_RETURN_URL="$PPB" \
       no_proxy="127.0.0.1,localhost" NO_PROXY="127.0.0.1,localhost" \
       exec "$LUME" app.lume ) >/tmp/nsgm-e2e-paypal.log 2>&1 &
@@ -493,6 +497,44 @@ PY
     || fail "交易号兜底应回填捕获 ID"
   echo "ok   早期订单（双空关联 ID）：need_recover 提示 -> capid 直达 / ppid 反查 / manual 本地标记 / 交易号捕获兜底 四条路径均落库 refunded"
 
+  # ---- 购物车（P2-4）：落库持久化，session 仅存 cart_id ----
+  # 场景：独立 cookie 会话跑加购 -> 会话持久（同 cookie 复得购物车，S1 边界 WORKERS=1
+  # 下跨请求持久）-> 结算建单(CART-*) + 扣库存 + 清空 -> 售罄商品被拒且保留在购物车。
+  # 全 JSON，与既有「直接下单」/api/shop/buy 正交，不改动其链路。
+  # 置于商品目录 clear 之前：本段依赖商品行（含 0 库存售罄样本）存在。
+  echo "==> 购物车阶段：加购 -> session 持久 -> 结算扣库存 -> 清空 -> 售罄拒单 ..."
+  CART_CJ="/tmp/nsgm-e2e-cart-cj.txt"
+  rm -f "$CART_CJ"
+  # 键盘库存基线（/api/product 列序固定：price_cents 紧跟 stock）
+  KB0="$(curl -s --noproxy '*' "$PPB/api/product" | grep -o '"price_cents":39900,"stock":[0-9]*' | head -1 | sed 's/.*://')"
+  [ -n "$KB0" ] || fail "购物车：未取到键盘库存基线"
+  # 1) 加购：键盘 x2（建购物车 + 会话写回 cart_id）
+  CART_ADD="$(curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" -X POST "$PPB/api/shop/cart/add" \
+    -H 'Content-Type: application/json' -d '{"product_id":1,"qty":2}')"
+  echo "$CART_ADD" | grep -q '"product_id":1' || fail "购物车：加购应含商品行: $CART_ADD"
+  echo "$CART_ADD" | grep -q '"total_cents":79800' || fail "购物车：键盘 x2 总价应 79800: $CART_ADD"
+  # 2) session 持久：同 cookie 复得同一购物车
+  CART_GET="$(curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" "$PPB/api/shop/cart")"
+  echo "$CART_GET" | grep -q '"total_cents":79800' || fail "购物车：同会话应复得购物车: $CART_GET"
+  # 3) 结算：建单（CART-*）+ 扣库存（-2）+ 清空购物车
+  CART_CK="$(curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" -X POST "$PPB/api/shop/cart/checkout" \
+    -H 'Content-Type: application/json' -d '{}')"
+  echo "$CART_CK" | grep -q '"order_no":"CART-' || fail "购物车：结算应建 CART-* 订单: $CART_CK"
+  echo "$CART_CK" | grep -q '"ok":true' || fail "购物车：结算行应 ok: $CART_CK"
+  KB1="$(curl -s --noproxy '*' "$PPB/api/product" | grep -o '"price_cents":39900,"stock":[0-9]*' | head -1 | sed 's/.*://')"
+  [ "$KB1" = "$((KB0 - 2))" ] || fail "购物车：结算后键盘库存应 $((KB0 - 2))（got $KB1）"
+  CART_EMPTY="$(curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" "$PPB/api/shop/cart")"
+  echo "$CART_EMPTY" | grep -q '"count":0' || fail "购物车：结算后应清空: $CART_EMPTY"
+  # 4) 售罄拒单：马克杯（库存 0）结算应 sold_out 且保留在购物车
+  curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" -X POST "$PPB/api/shop/cart/add" \
+    -H 'Content-Type: application/json' -d '{"product_id":3,"qty":1}' >/dev/null
+  CART_SO="$(curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" -X POST "$PPB/api/shop/cart/checkout" \
+    -H 'Content-Type: application/json' -d '{}')"
+  echo "$CART_SO" | grep -q '"err":"sold_out"' || fail "购物车：0 库存商品结算应 sold_out: $CART_SO"
+  CART_KEEP="$(curl -s --noproxy '*' -c "$CART_CJ" -b "$CART_CJ" "$PPB/api/shop/cart")"
+  echo "$CART_KEEP" | grep -q '"product_id":3' || fail "购物车：售罄行应保留在购物车: $CART_KEEP"
+  echo "ok   购物车：加购 -> session 持久 -> 结算建单扣库存 -> 清空 -> 售罄拒单且保留"
+
   # ---- 商品目录：空表自动播种 -> 清空不复活 -> 手动重载（用户诉求：给示例 + 清空按钮）----
   # 新库首访 /api/shop/products 已自动播种（上方 PP_PROD 断言即依赖该行为）；
   # 本段验证清空/重载闭环（JSON 端点，SPA 前端调同一接口）。
@@ -519,5 +561,5 @@ else
   echo "SKIP 支付阶段(PayPal): 无 python3"
 fi
 
-echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / NULL 归一 / PayPal 全链路(JSON) / 退款全链路(JSON) / 订单后台退款入口 / 库存扣减与售罄拒单 / 商品快照 / 退款回补 / 收银台复用防孤儿单 / ik 幂等 / 早期订单双空关联 ID 恢复 / 交易号捕获兜底 / 商品目录示例播种与清空重载)"
+echo "E2E PASS: 全部探针通过 (SSR / 静态 / CRUD / 搜索 / 通配符转义 / 分页 / qs_int 兜底 / 迁移 / NULL 归一 / PayPal 全链路(JSON) / 退款全链路(JSON) / 订单后台退款入口 / 库存扣减与售罄拒单 / 商品快照 / 退款回补 / 收银台复用防孤儿单 / ik 幂等 / 早期订单双空关联 ID 恢复 / 交易号捕获兜底 / 商品目录示例播种与清空重载 / 购物车落库加购-会话持久-结算扣库存-售罄拒单)"
 exit 0
